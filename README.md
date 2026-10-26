@@ -3,9 +3,6 @@
 Planning baseline for Ubuntu Server 26.04 LTS ARM64, VirtualBox, Terraform,
 Ansible and kubeadm: three control-plane nodes with stacked etcd and two workers.
 
-See the [compatibility proof and implementation gates](docs/compatibility-proof.md)
-for the current provider assessment and the proposed one-VM experiment.
-
 **Status: design and configuration scaffold. VM creation, kubeadm installation,
 and cluster deployment are not implemented or tested yet.** Terraform currently
 calculates the topology and Ansible inventory; it does not provision VMs.
@@ -55,11 +52,10 @@ NIC must not install a competing default route.
 On recent macOS, use VirtualBox **Host-Only Network** (`hostonlynet`), not legacy
 `hostonlyif`/`vboxnet0` instructions. Proposed network: host .1, managed address
 range .1–.9 (the host takes the lowest address), static node/VIP addresses above it.
-Verify actual DHCP and host addresses before use. An enabled legacy DHCP pool
-covering .101–.254 would overlap MetalLB: resolve it before using this subnet.
-Do not remove or modify an existing network automatically. Check LAN, WireGuard,
-Docker and other routes for conflicts;
-these addresses are a proposal, not a discovered free network.
+Verify actual DHCP and host addresses before use. Keep existing DHCP pools
+separate from the proposed node and VIP ranges. Check LAN, VPN, container and
+other routes for conflicts; these addresses are examples, not a discovered free
+network. Review existing network ownership before making changes.
 
 Pod CIDR: `10.244.0.0/16`; service CIDR: `10.96.0.0/12`. Both also require
 route-conflict checks. Start with Flannel VXLAN and kube-proxy to keep the lab
@@ -82,9 +78,9 @@ kube-vip can also handle application Services and is the fewest-component option
 MetalLB is recommended here because it is explicitly part of the learning goal.
 Never enable both controllers for the same Service pool. HAProxy on one extra
 512 MiB VM is an alternative API endpoint but introduces a single point of
-failure; two HAProxy/Keepalived VMs cost more RAM. Prefer kube-vip on this host.
+failure; two HAProxy/Keepalived VMs cost more RAM. Prefer kube-vip for this resource profile.
 
-Host-only service addresses are reachable from this Mac and attached VMs,
+Host-only service addresses are reachable from the host Mac and attached VMs,
 not automatically from the home LAN. Do not bridge onto Wi-Fi initially; add
 LAN access only as a separate, tested networking exercise.
 
@@ -97,8 +93,8 @@ failover, not physical infrastructure HA.
 Keep source code in a Git checkout and runtime disks outside that checkout:
 
 ```text
-my-github-repos/k8s-virtualbox-homelab/  # source only
-~/VirtualBox VMs/k8s-ha/
+<source-directory>/k8s-virtualbox-homelab/  # source only
+<private-runtime-directory>/
   images/                             # verified ARM64 installer / base image
   machines/                           # .vbox and dynamic .vdi files
   backups/                            # temporary local lab backups; private
@@ -113,10 +109,9 @@ and keep at least 30 GiB free for macOS. These are planning estimates, not
 guaranteed bounds. Guest file deletion does not necessarily shrink host VDIs.
 
 **Start the full build only with at least 100 GiB free; 120 GiB is preferred.**
-The initial Mac assessment found about 76 GiB free, so first reclaim roughly
-25–45 GiB or place the VM runtime on an external SSD. Nothing should be deleted
-automatically. Inspect candidates with `du`, review them, and use each tool's
-normal cleanup process. An external SSD helps disk capacity but does not add RAM.
+Measure available storage before building. If capacity is insufficient, review
+cleanup candidates manually or place the VM runtime on an external SSD. Use each
+tool's normal cleanup process. An external SSD helps disk capacity but does not add RAM.
 Use APFS for a dedicated Mac SSD; do not reformat a drive containing data.
 
 The 100/120 GiB gates assume a small lab with active capacity monitoring, not
@@ -155,7 +150,8 @@ snapshots private and out of Git.
 The reviewed `terra-farm/virtualbox` release `0.2.2-alpha.1` publishes a
 `darwin_arm64` binary, but its VM code hard-codes `Linux_64` and maps `hostonly`
 to legacy interfaces; it does not expose ARM guest platform or `hostonlynet`.
-Do not select it unchanged. See the [source-backed assessment](docs/compatibility-proof.md#terraform-integration-decision).
+Evaluate provider guest architecture and networking support before selecting it.
+See the [released provider source](https://github.com/terra-farm/terraform-provider-virtualbox/blob/v0.2.2-alpha.1/virtualbox/resource_vm.go).
 Proposed next step: prove VirtualBox directly with VBoxManage, then implement a
 small documented lifecycle adapter driven by Terraform topology. This has weaker
 drift/import semantics than a native provider. A custom provider is excessive
@@ -164,9 +160,8 @@ No adapter or VM provider is implemented yet; keep the hypervisor unchanged.
 
 For this single-user offline lab, local Terraform state is acceptable with a
 private backup, a single writer and exclusion from Git. Store state under
-`~/VirtualBox VMs/k8s-ha/terraform/`, outside the checkout; ignore rules are a
-second safeguard. A shared backend is
-only needed if collaboration warrants it. Commit dependency lock files after
+`<private-runtime-directory>/terraform/`, outside the checkout; ignore rules
+are a second safeguard. A shared backend is only needed if collaboration warrants it. Commit dependency lock files after
 providers are selected and initialized. Pin exact tested Kubernetes, containerd,
 CNI, kube-vip and MetalLB versions; record image digests and Ubuntu SHA256 before
 the implementation phase. No compatibility matrix has been tested yet.
@@ -194,10 +189,9 @@ example requiring a working CNI, Ready workers, and MetalLB CRDs/controller.
 ## Implementation sequence and acceptance gates
 
 1. **Host gate:** free at least 100 GiB, reduce competing memory use, confirm
-   VBoxManage responds, check host OS compatibility. The inspected macOS version
-   was 27.0.1; Oracle's retrieved 7.2 host list names macOS 26 and earlier, so
-   support for this exact host version remains unverified. Do not upgrade or
-   downgrade the host as part of lab setup without a separate decision.
+   VBoxManage responds, and confirm the installed macOS and VirtualBox versions
+   against Oracle's current compatibility documentation. CLI availability alone
+   does not prove guest execution support.
 2. **One-VM proof:** Ubuntu 26.04 ARM64 boots headless with 2 GiB RAM and SSH;
    NAT egress and Mac↔host-only reachability work. Test MAC address/ARP behavior
    for the future VIPs. Verify the Terraform provider lifecycle or choose the

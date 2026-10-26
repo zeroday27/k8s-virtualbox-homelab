@@ -21,3 +21,14 @@ __pycache__/
 *.qcow2
 backups/
 secrets/
+
+# Local agent instructions, memory and private planning notes
+[Aa][Gg][Ee][Nn][Tt].md
+[Aa][Gg][Ee][Nn][Tt][Ss].md
+CLAUDE.md
+[Mm][Ee][Mm][Oo][Rr][Yy].md
+[Mm][Ee][Mm][Oo][Rr][Yy]/
+.agents/
+.codex/
+.local/
+plan/
