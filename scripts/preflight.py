@@ -39,7 +39,10 @@ def main():
         "virtualbox": ["VBoxManage", "--version"],
         "terraform": ["terraform", "version", "-json"],
         "virtualbox_inventory": ["VBoxManage", "list", "vms"],
+        "virtualbox_running": ["VBoxManage", "list", "runningvms"],
         "virtualbox_networks": ["VBoxManage", "list", "hostonlynets"],
+        "virtualbox_legacy_interfaces": ["VBoxManage", "list", "hostonlyifs"],
+        "virtualbox_dhcp": ["VBoxManage", "list", "dhcpservers"],
         "routes": ["netstat", "-rn", "-f", "inet"],
     }.items():
         report["tools"][name] = run(args)

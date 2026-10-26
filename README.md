@@ -3,6 +3,9 @@
 Planning baseline for Ubuntu Server 26.04 LTS ARM64, VirtualBox, Terraform,
 Ansible and kubeadm: three control-plane nodes with stacked etcd and two workers.
 
+See the [compatibility proof and implementation gates](docs/compatibility-proof.md)
+for the current provider assessment and the proposed one-VM experiment.
+
 **Status: design and configuration scaffold. VM creation, kubeadm installation,
 and cluster deployment are not implemented or tested yet.** Terraform currently
 calculates the topology and Ansible inventory; it does not provision VMs.
@@ -50,9 +53,12 @@ can all have the same guest address. NAT remains the default route; the host-onl
 NIC must not install a competing default route.
 
 On recent macOS, use VirtualBox **Host-Only Network** (`hostonlynet`), not legacy
-`hostonlyif`/`vboxnet0` instructions. Proposed network: host .1, dynamic address
-range .2–.9, static node/VIP addresses above it. Verify actual DHCP and host
-addresses before use. Check LAN, WireGuard, Docker and other routes for conflicts;
+`hostonlyif`/`vboxnet0` instructions. Proposed network: host .1, managed address
+range .1–.9 (the host takes the lowest address), static node/VIP addresses above it.
+Verify actual DHCP and host addresses before use. An enabled legacy DHCP pool
+covering .101–.254 would overlap MetalLB: resolve it before using this subnet.
+Do not remove or modify an existing network automatically. Check LAN, WireGuard,
+Docker and other routes for conflicts;
 these addresses are a proposal, not a discovered free network.
 
 Pod CIDR: `10.244.0.0/16`; service CIDR: `10.96.0.0/12`. Both also require
@@ -96,6 +102,8 @@ my-github-repos/k8s-virtualbox-homelab/  # source only
   images/                             # verified ARM64 installer / base image
   machines/                           # .vbox and dynamic .vdi files
   backups/                            # temporary local lab backups; private
+  terraform/                          # local state and private plan artifacts
+  config/                             # SSH material, installer seeds, kubeconfigs
 ```
 
 The baseline can expose 88 GiB of virtual disk capacity, but dynamically allocated
@@ -110,6 +118,12 @@ The initial Mac assessment found about 76 GiB free, so first reclaim roughly
 automatically. Inspect candidates with `du`, review them, and use each tool's
 normal cleanup process. An external SSD helps disk capacity but does not add RAM.
 Use APFS for a dedicated Mac SSD; do not reformat a drive containing data.
+
+The 100/120 GiB gates assume a small lab with active capacity monitoring, not
+space for every disk to fill. Five full root disks alone can use 88 GiB. A
+retained base, installer, temporary files and 30 GiB host reserve can push the
+worst-case requirement above 140 GiB before substantial backups or snapshots.
+Measure actual growth and stop before host free space falls below 30 GiB.
 
 Use full clones for predictable independent node disks, not chains of linked
 clones and snapshots. Keep at most one short-lived snapshot for an exercise.
@@ -138,18 +152,20 @@ snapshots private and out of Git.
 | Ansible | OS/containerd, pinned Kubernetes packages, VIP, sequential kubeadm bootstrap/join, CNI and add-ons |
 | GitHub Actions | Static validation only; no access to the local Mac required |
 
-Do not assume an old VirtualBox Terraform provider supports Apple Silicon and
-modern host-only networks. Evaluate `terra-farm/virtualbox` or a maintained fork
-in a disposable one-VM proof before selecting and pinning it. Require a
-darwin_arm64 binary, ARM platform support, `hostonlynet`, predictable refresh,
-and targeted deletion. The provider has not been validated for this host.
-If unsuitable, explicitly choose either a small maintained custom provider or
-a documented VBoxManage lifecycle adapter. A `terraform_data` plus scripts
-adapter is a fallback with weaker drift/import semantics, not native provider
-support. Do not silently substitute a different hypervisor.
+The reviewed `terra-farm/virtualbox` release `0.2.2-alpha.1` publishes a
+`darwin_arm64` binary, but its VM code hard-codes `Linux_64` and maps `hostonly`
+to legacy interfaces; it does not expose ARM guest platform or `hostonlynet`.
+Do not select it unchanged. See the [source-backed assessment](docs/compatibility-proof.md#terraform-integration-decision).
+Proposed next step: prove VirtualBox directly with VBoxManage, then implement a
+small documented lifecycle adapter driven by Terraform topology. This has weaker
+drift/import semantics than a native provider. A custom provider is excessive
+for the first lab; any maintained fork must pass the same compatibility gates.
+No adapter or VM provider is implemented yet; keep the hypervisor unchanged.
 
 For this single-user offline lab, local Terraform state is acceptable with a
-private backup, a single writer and exclusion from Git. A shared backend is
+private backup, a single writer and exclusion from Git. Store state under
+`~/VirtualBox VMs/k8s-ha/terraform/`, outside the checkout; ignore rules are a
+second safeguard. A shared backend is
 only needed if collaboration warrants it. Commit dependency lock files after
 providers are selected and initialized. Pin exact tested Kubernetes, containerd,
 CNI, kube-vip and MetalLB versions; record image digests and Ubuntu SHA256 before
@@ -162,13 +178,14 @@ python3 scripts/preflight.py
 terraform -chdir=terraform init -backend=false
 terraform -chdir=terraform fmt -check
 terraform -chdir=terraform validate
+# Read-only topology plan; no saved plan or state is written by this command.
 terraform -chdir=terraform plan
-# Apply here only computes outputs/state; it creates no VMs.
-terraform -chdir=terraform apply
-mkdir -p .generated
-terraform -chdir=terraform output -json ansible_inventory > .generated/inventory.json
-ANSIBLE_LOCAL_TEMP=/tmp/k8s-lab-ansible ansible-inventory -i .generated/inventory.json --list
 ```
+
+When implementation begins, configure the local backend with an absolute state
+path outside the checkout before the first apply. Keep generated inventory in
+`.generated/` (ignored) and private SSH material outside the checkout. No apply
+is needed to review this scaffold.
 
 `ansible/preflight.yml` is a read-only guest check for the later SSH-ready VMs.
 Do not run it before the VMs exist. `manifests/metallb-pool.example.yaml` is an
