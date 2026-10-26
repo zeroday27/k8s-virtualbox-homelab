@@ -1,0 +1,15 @@
+---
+- name: Read-only guest checks after VM provisioning
+  hosts: all
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Verify expected Ubuntu ARM64 guest and memory allocation
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['architecture'] == lab_expected_architecture
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == lab_expected_ubuntu_version
+          - ansible_facts['memtotal_mb'] >= 1800
+          - ansible_host in ansible_facts['all_ipv4_addresses']
+        fail_msg: Check guest architecture, OS, memory and host-only static address.

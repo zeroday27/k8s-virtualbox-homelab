@@ -1,0 +1,23 @@
+# Example only. Install a pinned MetalLB release and wait for its webhook first.
+# Label both workers: kubectl label node worker1 worker2 lab-lb-speaker=true
+# Change addresses if the Terraform network_cidr is overridden.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab-services
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.56.200-192.168.56.219
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: lab-services
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - lab-services
+  nodeSelectors:
+    - matchLabels:
+        lab-lb-speaker: "true"
