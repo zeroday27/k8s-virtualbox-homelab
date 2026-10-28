@@ -71,6 +71,13 @@ terraform -chdir=terraform plan
 make check
 ```
 
+When refreshing the Proxmox provider lock, include both the Linux CI runner and
+ARM Mac checksums. Commit the updated lock file; CI uses `-lockfile=readonly`.
+
+```sh
+terraform -chdir=terraform/adapters/proxmox providers lock -platform=linux_amd64 -platform=darwin_arm64
+```
+
 Copy a generic specification into a private environment directory and customize
 node classes, addresses, placement, image identity, security requirements,
 components and recovery objectives. The JSON schema rejects unknown fields;
