@@ -1,0 +1,95 @@
+---
+- name: Ensure owned configuration directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/ssh/sshd_config.d
+    - /etc/systemd/journald.conf.d
+
+- name: Inspect AppArmor kernel support
+  ansible.builtin.command: cat /sys/module/apparmor/parameters/enabled
+  check_mode: false
+  changed_when: false
+  register: baseline_apparmor_kernel
+  when: baseline_apparmor_required | bool
+
+- name: Require AppArmor to remain enabled
+  ansible.builtin.assert:
+    that: baseline_apparmor_kernel.stdout | trim == 'Y'
+    fail_msg: AppArmor is disabled in the kernel. Review boot configuration; this role never disables it.
+  when: baseline_apparmor_required | bool
+
+- name: Inspect loaded AppArmor profiles
+  ansible.builtin.command: aa-status --json
+  check_mode: false
+  changed_when: false
+  when: "'apparmor-utils' in ansible_facts.packages"
+
+- name: Configure bounded journal retention
+  ansible.builtin.template:
+    src: journald.conf.j2
+    dest: /etc/systemd/journald.conf.d/60-onprem.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart journald
+
+- name: Validate rendered logrotate policy without rotating logs
+  ansible.builtin.command:
+    argv: [/usr/sbin/logrotate, --debug, /dev/stdin]
+    stdin: "{{ lookup('ansible.builtin.template', 'logrotate.conf.j2') }}"
+  check_mode: false
+  changed_when: false
+  when: not ansible_check_mode or 'logrotate' in ansible_facts.packages
+
+- name: Configure system logrotate defaults while retaining package-specific rules
+  ansible.builtin.template:
+    src: logrotate.conf.j2
+    dest: /etc/logrotate.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/logrotate --debug %s
+
+- name: Bound auditd logs without halting a small lab on full disks
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^\s*{{ item.key }}\s*='
+    line: '{{ item.key }} = {{ item.value }}'
+    owner: root
+    group: root
+    mode: '0640'
+  loop:
+    - {key: max_log_file, value: '{{ baseline_audit_max_log_file }}'}
+    - {key: num_logs, value: '{{ baseline_audit_num_logs }}'}
+    - {key: max_log_file_action, value: ROTATE}
+    - {key: disk_full_action, value: SYSLOG}
+    - {key: disk_error_action, value: SYSLOG}
+  notify: Restart auditd
+  when: not ansible_check_mode or 'auditd' in ansible_facts.packages
+
+- name: Configure conservative kernel protections without overriding CNI networking
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/60-onprem-security.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      kernel.kptr_restrict = 2
+      kernel.dmesg_restrict = 1
+      kernel.randomize_va_space = 2
+      fs.suid_dumpable = 0
+      fs.protected_hardlinks = 1
+      fs.protected_symlinks = 1
+      net.ipv4.conf.all.accept_redirects = 0
+      net.ipv4.conf.default.accept_redirects = 0
+      net.ipv4.conf.all.send_redirects = 0
+      net.ipv4.conf.default.send_redirects = 0
+      net.ipv4.conf.all.accept_source_route = 0
+      net.ipv4.conf.default.accept_source_route = 0
+      net.ipv4.tcp_syncookies = 1
+  notify: Load baseline sysctl settings

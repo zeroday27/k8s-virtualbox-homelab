@@ -1,0 +1,81 @@
+---
+- name: Validate rendered SSH directives without changing the live daemon
+  ansible.builtin.command:
+    argv: [/usr/sbin/sshd, -t, -f, /dev/stdin]
+    stdin: "{{ lookup('ansible.builtin.template', 'sshd.conf.j2') }}"
+  check_mode: false
+  changed_when: false
+
+- name: Render the owned SSH drop-in including check-mode diff
+  ansible.builtin.template:
+    src: sshd.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-onprem-baseline.conf
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+  register: baseline_sshd_file
+
+- name: Stage and validate SSH policy before reloading the service
+  when: not ansible_check_mode
+  block:
+    - name: Validate the complete effective SSH configuration
+      ansible.builtin.command:
+        argv: [/usr/sbin/sshd, -t]
+      changed_when: false
+
+    - name: Inspect effective authentication policy
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/sshd
+          - -T
+          - -C
+          - "user={{ baseline_admin_user }},host={{ inventory_hostname }},addr={{ baseline_admin_source_address }}"
+      register: baseline_effective_sshd
+      changed_when: false
+
+    - name: Require effective key-only login and disabled root login
+      ansible.builtin.assert:
+        that:
+          - "'passwordauthentication no' in baseline_effective_sshd.stdout_lines"
+          - "'kbdinteractiveauthentication no' in baseline_effective_sshd.stdout_lines"
+          - "'pubkeyauthentication yes' in baseline_effective_sshd.stdout_lines"
+          - "'permitrootlogin no' in baseline_effective_sshd.stdout_lines"
+        fail_msg: Existing SSH configuration overrides the baseline; rollback and review it.
+
+    - name: Reload validated SSH configuration  # noqa: no-handler -- validate and reconnect within this recovery block
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded
+      when: baseline_sshd_file.changed
+
+    - name: Reset the transport to test a fresh connection
+      ansible.builtin.meta: reset_connection
+
+    - name: Verify a fresh SSH connection
+      ansible.builtin.wait_for_connection:
+        timeout: 60
+
+  rescue:
+    - name: Restore the previous owned SSH drop-in
+      ansible.builtin.copy:
+        src: "{{ baseline_sshd_file.backup_file }}"
+        dest: /etc/ssh/sshd_config.d/00-onprem-baseline.conf
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      when: baseline_sshd_file is defined and baseline_sshd_file.backup_file is defined
+
+    - name: Remove a newly introduced SSH drop-in
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/00-onprem-baseline.conf
+        state: absent
+      when:
+        - baseline_sshd_file is defined
+        - baseline_sshd_file.changed | default(false)
+        - baseline_sshd_file.backup_file is not defined
+
+    - name: Stop for console-assisted recovery if SSH access was lost
+      ansible.builtin.fail:
+        msg: SSH baseline failed. Review effective policy and use the verified recovery console if reconnection failed.

@@ -1,0 +1,46 @@
+# Only this table is replaced atomically. Never flush ruleset or CNI tables.
+add table inet os_baseline
+delete table inet os_baseline
+table inet os_baseline {
+  set bastions { type ipv4_addr; elements = { {{ baseline_firewall_policy.bastions | join(', ') }} }; }
+  set nodes { type ipv4_addr; elements = { {{ baseline_firewall_policy.nodes | join(', ') }} }; }
+  set controls { type ipv4_addr; elements = { {{ baseline_firewall_policy.controls | join(', ') }} }; }
+  chain input {
+    type filter hook input priority -10; policy drop;
+    iifname "lo" accept
+    ct state invalid drop
+    ct state established,related accept
+    # DHCP renewal and essential network control traffic are not application listeners.
+    iifname "nat0" udp sport 67 udp dport 68 accept
+    ip protocol icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
+    meta l4proto ipv6-icmp accept
+    ip saddr @bastions tcp dport {{ baseline_firewall_policy.ports.ssh_port }} accept
+    ip saddr @bastions icmp type echo-request accept
+    ip saddr @nodes icmp type echo-request accept
+    ip saddr @controls tcp dport {{ baseline_firewall_policy.ports.kubelet_port }} accept
+{% if baseline_firewall_policy.metrics and baseline_firewall_policy.pods %}
+    ip saddr { {{ baseline_firewall_policy.pods | join(', ') }} } tcp dport {{ baseline_firewall_policy.ports.kubelet_port }} accept
+{% endif %}
+{% if baseline_firewall_policy.role == 'control_plane' %}
+    ip saddr @nodes tcp dport {{ baseline_firewall_policy.ports.api_port }} accept
+    ip saddr @bastions tcp dport {{ baseline_firewall_policy.ports.api_port }} accept
+{% if baseline_firewall_policy.pods %}
+    ip saddr { {{ baseline_firewall_policy.pods | join(', ') }} } tcp dport {{ baseline_firewall_policy.ports.api_port }} accept
+{% endif %}
+    ip saddr @controls tcp dport { 2379, 2380 } accept
+{% endif %}
+{% if baseline_firewall_policy.transport in ['ipip', 'none'] %}
+    ip saddr @nodes tcp dport 179 accept
+{% endif %}
+{% if baseline_firewall_policy.transport == 'ipip' %}
+    ip saddr @nodes ip protocol 4 accept
+{% elif baseline_firewall_policy.transport == 'vxlan' %}
+    ip saddr @nodes udp dport 4789 accept
+{% endif %}
+{% if baseline_firewall_policy.nodeport_sources and baseline_firewall_policy.role == 'worker' %}
+    ip saddr { {{ baseline_firewall_policy.nodeport_sources | join(', ') }} } tcp dport {{ baseline_firewall_policy.nodeport_range }} accept
+    ip saddr { {{ baseline_firewall_policy.nodeport_sources | join(', ') }} } udp dport {{ baseline_firewall_policy.nodeport_range }} accept
+{% endif %}
+  }
+  # No forward/output hook: Calico/kube-proxy retain packet forwarding/NAT ownership.
+}

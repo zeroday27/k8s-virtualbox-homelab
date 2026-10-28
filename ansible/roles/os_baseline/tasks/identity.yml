@@ -1,0 +1,28 @@
+---
+# Ansible already iterates over every inventory host (serial: 1 in the playbook).
+- name: Set this inventory host's configurable hostname
+  ansible.builtin.hostname:
+    name: "{{ baseline_hostname }}"
+    use: systemd
+
+- name: Keep the local hostname resolvable
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: "127.0.1.1 {{ baseline_hostname }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Set the configurable Bangkok default timezone
+  community.general.timezone:
+    name: "{{ baseline_timezone }}"
+
+- name: Configure time synchronization
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart chrony

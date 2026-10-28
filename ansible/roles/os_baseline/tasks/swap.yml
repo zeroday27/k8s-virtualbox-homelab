@@ -1,0 +1,52 @@
+---
+- name: Read active swap entries
+  ansible.builtin.command:
+    argv: [swapon, --show, --noheadings, --output, NAME]
+  check_mode: false
+  changed_when: false
+  register: baseline_active_swap
+
+- name: Remove persistent swap entries from fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(?!#)(\S+\s+\S+\s+swap\s+.*)$'
+    replace: '# Disabled by os_baseline: \1'
+    backup: true
+
+- name: Find systemd swap units including zram-generated units
+  ansible.builtin.command:
+    argv: [systemctl, list-unit-files, --type=swap, --no-legend, --no-pager]
+  check_mode: false
+  changed_when: false
+  register: baseline_swap_units
+  failed_when: >-
+    baseline_swap_units.rc != 0 and not
+    (baseline_swap_units.rc == 1 and baseline_swap_units.stdout | trim == '' and baseline_swap_units.stderr | trim == '')
+
+- name: Mask declared systemd swap units
+  ansible.builtin.systemd_service:
+    name: "{{ item.split()[0] }}"
+    masked: true
+    state: stopped
+  loop: "{{ baseline_swap_units.stdout_lines }}"
+
+- name: Predict disabling currently active swap
+  ansible.builtin.debug:
+    msg: "Would disable swap: {{ baseline_active_swap.stdout_lines }}"
+  changed_when: baseline_active_swap.stdout_lines | length > 0
+  when: ansible_check_mode
+
+- name: Turn off active swap without removing swap files
+  ansible.builtin.command: swapoff --all
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - baseline_active_swap.stdout_lines | length > 0
+
+- name: Verify no active swap remains after apply
+  ansible.builtin.command:
+    argv: [swapon, --show, --noheadings, --output, NAME]
+  register: baseline_swap_after
+  changed_when: false
+  failed_when: baseline_swap_after.stdout | trim | length > 0
+  when: not ansible_check_mode

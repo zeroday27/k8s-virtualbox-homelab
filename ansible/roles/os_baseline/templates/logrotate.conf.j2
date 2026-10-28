@@ -1,0 +1,10 @@
+# Managed global defaults; package-specific stanzas may override these values.
+{{ baseline_logrotate_frequency }}
+rotate {{ baseline_logrotate_keep }}
+maxsize {{ baseline_logrotate_maxsize }}
+create
+compress
+delaycompress
+missingok
+notifempty
+include /etc/logrotate.d

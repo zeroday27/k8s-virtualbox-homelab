@@ -20,6 +20,7 @@ jobs:
         with:
           terraform_version: 1.16.1
       - run: python -m pip install --require-hashes -r requirements-dev.txt
+      - run: ansible-galaxy collection install -r ansible/requirements.yml
       - run: python scripts/check_public.py
       - run: python scripts/specctl.py validate --spec specs/lab-virtualbox-single.json
       - run: python scripts/specctl.py validate --spec specs/lab-virtualbox.json

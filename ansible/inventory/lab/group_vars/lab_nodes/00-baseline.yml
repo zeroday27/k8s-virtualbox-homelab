@@ -1,0 +1,7 @@
+---
+baseline_timezone: Asia/Bangkok
+baseline_ntp_servers: [ntp.ubuntu.com]
+baseline_firewall_enabled: true
+baseline_cni_transport: ipip
+baseline_swap_disabled: true
+baseline_lvm_enabled: false

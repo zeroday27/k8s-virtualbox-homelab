@@ -1,0 +1,8 @@
+---
+profile: production
+# Keep the existing public baseline_* role variable API.
+skip_list:
+  - var-naming[no-role-prefix]
+exclude_paths:
+  - ../.generated/
+  - inventory/lab/group_vars/lab_nodes/90-site.local.yml

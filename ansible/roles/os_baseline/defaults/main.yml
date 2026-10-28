@@ -1,8 +1,42 @@
 ---
-# Set this to a YAML/JSON boolean only after key-based SSH and sudo are tested.
+# Confirm trusted SSH, sudo and a recovery console before any apply.
 baseline_access_verified: false
 baseline_admin_user: "{{ ansible_user }}"
-baseline_ntp_servers: []
+baseline_hostname: "{{ inventory_hostname }}"
+baseline_timezone: Asia/Bangkok
+baseline_ntp_servers: [ntp.ubuntu.com]
+baseline_apt_cache_valid_time: 3600
+baseline_swap_disabled: true
+baseline_apparmor_required: true
 baseline_journal_max_use: 256M
 baseline_journal_retention: 14day
-baseline_admin_source_address: "{{ (ansible_facts['env'].get('SSH_CONNECTION', '').split() | first) | default('') }}"
+baseline_logrotate_frequency: daily
+baseline_logrotate_keep: 14
+baseline_logrotate_maxsize: 50M
+baseline_audit_max_log_file: 16
+baseline_audit_num_logs: 5
+baseline_node_role: "{{ 'control_plane' if inventory_hostname in groups.get('control_plane', []) else 'worker' }}"
+baseline_firewall_enabled: false
+baseline_bastion_cidrs: []
+baseline_node_addresses: []
+baseline_control_plane_addresses: []
+baseline_pod_cidrs: [10.244.0.0/16]
+baseline_cni_transport: ipip
+baseline_ssh_port: 22
+baseline_api_port: 6443
+baseline_kubelet_port: 10250
+baseline_nodeport_enabled: false
+baseline_nodeport_sources: []
+baseline_nodeport_range: 30000-32767
+baseline_metrics_to_kubelet: false
+baseline_firewall_rollback_seconds: 120
+# Only explicitly identified extra disks may be used. Never convert the root disk.
+baseline_lvm_enabled: false
+baseline_lvm_devices: []
+baseline_lvm_vg: vg_k8s
+baseline_lvm_volumes:
+  - name: data
+    size: 8g
+    mount: /srv/k8s-data
+    fstype: ext4
+    opts: defaults,nodev,nosuid

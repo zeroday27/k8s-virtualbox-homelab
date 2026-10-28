@@ -120,11 +120,14 @@ SSH configuration is tested before reload; failed reconnection can require conso
 recovery because Ansible cannot roll back over a lost connection. Review effective
 `Match` rules for the actual administrator source address.
 
-Keep AppArmor enabled. Kubespray owns containerd, swap and CNI prerequisites. Host
-firewall hardening must account for CNI encapsulation, forwarded pod traffic,
-kube-proxy mode, BGP if chosen and MetalLB memberlist; a blanket UFW policy can
-break the cluster. Full firewall rules, audit rules, patch orchestration, compliance
-exceptions and hardware-specific hardening remain implementation gates.
+Keep AppArmor enabled. The baseline prepares swap-off and conservative host
+protections; Kubespray enforces runtime, swap and CNI prerequisites during cluster
+installation. The lab can select a peer-scoped host-input nftables policy; it
+leaves forwarding and NAT to the CNI. Review the actual Calico transport and prove
+pod traffic plus host isolation on a canary before qualification. Broad firewall
+remediation, detailed audit rules, patch orchestration and compliance certification
+remain outside this baseline. See the [baseline role guide](../ansible/roles/os_baseline/README.md)
+for variables, recovery and check-mode limitations.
 
 Fetch Kubespray into a private directory using `scripts/fetch-kubespray.sh`. The
 script verifies the immutable commit and never executes a playbook. Use a separate

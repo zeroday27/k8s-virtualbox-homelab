@@ -44,3 +44,8 @@ ANSIBLE_CONFIG=ansible/ansible.cfg .venv/bin/ansible-inventory --graph
 
 Inventory and role paths resolve relative to `ansible/ansible.cfg`. Existing Make
 and CI checks use this same configuration.
+
+Baseline defaults live in `group_vars/lab_nodes/00-baseline.yml`; actual bastion and
+peer addresses belong in ignored `group_vars/lab_nodes/90-site.local.yml`. See the
+[baseline variable and firewall guide](../../roles/os_baseline/README.md) before
+check mode or apply. Install `ansible/requirements.yml` collections first.

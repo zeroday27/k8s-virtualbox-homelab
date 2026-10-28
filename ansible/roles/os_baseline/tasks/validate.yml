@@ -1,0 +1,43 @@
+---
+- name: Observe the actual SSH source before privilege escalation
+  ansible.builtin.command: printenv SSH_CONNECTION
+  become: false
+  check_mode: false
+  changed_when: false
+  register: baseline_ssh_connection
+
+- name: Record the actual administrator source address
+  ansible.builtin.set_fact:
+    baseline_admin_source_address: "{{ baseline_ssh_connection.stdout.split() | first }}"
+
+- name: Require a validated bootstrap path and supported Ubuntu image
+  ansible.builtin.assert:
+    that:
+      - baseline_access_verified is sameas true
+      - baseline_admin_user != 'root'
+      - baseline_admin_source_address | length > 0
+      - baseline_ntp_servers | length > 0
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_version'] == baseline_expected_release
+      - baseline_hostname is match('^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$')
+      - baseline_timezone is match('^([A-Za-z0-9_+-]+/)*[A-Za-z0-9_+-]+$')
+      - baseline_logrotate_frequency in ['daily', 'weekly', 'monthly']
+      - baseline_logrotate_keep | int > 0
+      - baseline_logrotate_maxsize is match('^[1-9][0-9]*[kMG]$')
+      - baseline_audit_max_log_file | int > 0
+      - baseline_audit_num_logs | int >= 2
+      - baseline_firewall_rollback_seconds | int >= 90
+      - baseline_firewall_rollback_seconds | int <= 300
+    fail_msg: Verify trusted key-based SSH, sudo, recovery console and valid baseline variables first.
+
+- name: Inspect requested timezone data
+  ansible.builtin.stat:
+    path: "/usr/share/zoneinfo/{{ baseline_timezone }}"
+  register: baseline_zoneinfo
+
+- name: Require a real timezone
+  ansible.builtin.assert:
+    that: baseline_zoneinfo.stat.exists
+
+- name: Collect current service state without changing it
+  ansible.builtin.service_facts:

@@ -43,3 +43,6 @@ plan/
 reports/
 crash.log
 crash.*.log
+
+# Private host allowlists; keep actual addresses outside public Git history
+ansible/inventory/lab/group_vars/lab_nodes/90-site.local.yml

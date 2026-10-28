@@ -1,15 +1,24 @@
 ---
 - name: Restart chrony
+  when: not ansible_check_mode
   ansible.builtin.service:
     name: chrony
     state: restarted
 
 - name: Restart journald
+  when: not ansible_check_mode
   ansible.builtin.service:
     name: systemd-journald
     state: restarted
 
 - name: Load baseline sysctl settings
+  when: not ansible_check_mode
   ansible.builtin.command:
     argv: [/sbin/sysctl, --load=/etc/sysctl.d/60-onprem-security.conf]
   changed_when: true
+
+- name: Restart auditd
+  ansible.builtin.service:
+    name: auditd
+    state: restarted
+  when: not ansible_check_mode

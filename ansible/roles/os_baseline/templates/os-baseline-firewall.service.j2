@@ -1,0 +1,14 @@
+[Unit]
+Description=Reviewed OS baseline host-input firewall
+After=network.target
+Before=kubelet.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft --file /etc/os-baseline-firewall.nft
+ExecReload=/usr/sbin/nft --file /etc/os-baseline-firewall.nft
+ExecStop=/usr/sbin/nft delete table inet os_baseline
+
+[Install]
+WantedBy=multi-user.target

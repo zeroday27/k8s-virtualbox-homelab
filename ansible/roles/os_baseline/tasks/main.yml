@@ -1,144 +1,54 @@
 ---
-- name: Require a validated bootstrap path and supported Ubuntu image
-  ansible.builtin.assert:
-    that:
-      - baseline_access_verified is sameas true
-      - baseline_admin_user != 'root'
-      - baseline_admin_source_address | length > 0
-      - baseline_ntp_servers | length > 0
-      - ansible_facts['distribution'] == 'Ubuntu'
-      - ansible_facts['distribution_version'] == baseline_expected_release
-    fail_msg: Verify SSH public-key login, trusted host keys, sudo and recovery-console access first.
+- name: Validate access and baseline variables
+  ansible.builtin.import_tasks: validate.yml
 
-- name: Install baseline services without running an unattended distribution upgrade
+- name: Refresh apt metadata before package changes
   ansible.builtin.apt:
-    name:
-      - apparmor
-      - auditd
-      - ca-certificates
-      - chrony
-    state: present
     update_cache: true
-    cache_valid_time: 3600
+    cache_valid_time: "{{ baseline_apt_cache_valid_time }}"
 
-- name: Ensure configuration directories exist
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  loop:
-    - /etc/ssh/sshd_config.d
-    - /etc/systemd/journald.conf.d
+- name: Observe installed baseline packages
+  ansible.builtin.package_facts:
+    manager: auto
 
-- name: Configure time synchronization
-  ansible.builtin.template:
-    src: chrony.conf.j2
-    dest: /etc/chrony/chrony.conf
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Restart chrony
+- name: Install baseline services without a distribution upgrade
+  ansible.builtin.apt:
+    name: [apparmor, apparmor-utils, auditd, ca-certificates, chrony, logrotate, nftables, tzdata]
+    state: present
 
-- name: Configure bounded journal retention
-  ansible.builtin.template:
-    src: journald.conf.j2
-    dest: /etc/systemd/journald.conf.d/60-onprem.conf
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Restart journald
+- name: Configure host identity and time
+  ansible.builtin.import_tasks: identity.yml
 
-- name: Configure conservative host kernel protections
-  ansible.builtin.copy:
-    dest: /etc/sysctl.d/60-onprem-security.conf
-    owner: root
-    group: root
-    mode: '0644'
-    content: |
-      kernel.kptr_restrict = 2
-      kernel.dmesg_restrict = 1
-      fs.suid_dumpable = 0
-  notify: Load baseline sysctl settings
+- name: Disable swap for the selected Kubernetes profile
+  ansible.builtin.import_tasks: swap.yml
+  when: baseline_swap_disabled | bool
 
-- name: Stage and validate SSH policy before reloading the service
-  when: not ansible_check_mode
-  block:
-    - name: Write owned SSH drop-in with rollback backup
-      ansible.builtin.template:
-        src: sshd.conf.j2
-        dest: /etc/ssh/sshd_config.d/00-onprem-baseline.conf
-        owner: root
-        group: root
-        mode: '0600'
-        backup: true
-      register: baseline_sshd_file
+- name: Configure bounded logs and conservative hardening
+  ansible.builtin.import_tasks: hardening.yml
 
-    - name: Validate the complete effective SSH configuration
-      ansible.builtin.command:
-        argv: [/usr/sbin/sshd, -t]
-      changed_when: false
+- name: Configure and validate SSH policy
+  ansible.builtin.import_tasks: ssh.yml
 
-    - name: Inspect effective authentication policy
-      ansible.builtin.command:
-        argv:
-          - /usr/sbin/sshd
-          - -T
-          - -C
-          - "user={{ baseline_admin_user }},host={{ inventory_hostname }},addr={{ baseline_admin_source_address }}"
-      register: baseline_effective_sshd
-      changed_when: false
+- name: Prepare the reviewed host-input firewall
+  ansible.builtin.import_tasks: firewall.yml
+  when: baseline_firewall_enabled | bool
 
-    - name: Require effective key-only login and disabled root login
-      ansible.builtin.assert:
-        that:
-          - "'passwordauthentication no' in baseline_effective_sshd.stdout_lines"
-          - "'kbdinteractiveauthentication no' in baseline_effective_sshd.stdout_lines"
-          - "'pubkeyauthentication yes' in baseline_effective_sshd.stdout_lines"
-          - "'permitrootlogin no' in baseline_effective_sshd.stdout_lines"
-        fail_msg: Existing SSH configuration overrides the baseline; rollback and review it.
+- name: Prepare explicitly declared extra LVM storage
+  ansible.builtin.import_tasks: lvm.yml
+  when: baseline_lvm_enabled | bool
 
-    - name: Reload validated SSH configuration
-      ansible.builtin.service:
-        name: ssh
-        state: reloaded
-      when: baseline_sshd_file.changed
-
-    - name: Reset the transport to test a fresh connection
-      ansible.builtin.meta: reset_connection
-
-    - name: Verify a fresh SSH connection
-      ansible.builtin.wait_for_connection:
-        timeout: 60
-
-  rescue:
-    - name: Restore the previous owned SSH drop-in
-      ansible.builtin.copy:
-        src: "{{ baseline_sshd_file.backup_file }}"
-        dest: /etc/ssh/sshd_config.d/00-onprem-baseline.conf
-        remote_src: true
-        owner: root
-        group: root
-        mode: '0600'
-      when: baseline_sshd_file is defined and baseline_sshd_file.backup_file is defined
-
-    - name: Remove a newly introduced SSH drop-in
-      ansible.builtin.file:
-        path: /etc/ssh/sshd_config.d/00-onprem-baseline.conf
-        state: absent
-      when:
-        - baseline_sshd_file is defined
-        - baseline_sshd_file.changed | default(false)
-        - baseline_sshd_file.backup_file is not defined
-
-    - name: Stop for console-assisted recovery if SSH access was lost
-      ansible.builtin.fail:
-        msg: SSH baseline failed. Review effective policy and use the verified recovery console if reconnection failed.
-
-- name: Enable baseline services
+- name: Enable installed baseline services
   ansible.builtin.service:
     name: "{{ item }}"
     state: started
     enabled: true
-  loop: [chrony, auditd]
+  loop: [chrony, auditd, apparmor, logrotate.timer]
+  when: not ansible_check_mode or (item | regex_replace('\.timer$', '')) in ansible_facts.packages
+
+- name: Describe check-mode limitations
+  ansible.builtin.debug:
+    msg: >-
+      Check mode predicts file/package changes. SSH reload, swapoff, firewall
+      activation/rollback, service restarts and LVM changes are not executed.
+      Missing-package services and audit configuration require a later apply.
+  when: ansible_check_mode

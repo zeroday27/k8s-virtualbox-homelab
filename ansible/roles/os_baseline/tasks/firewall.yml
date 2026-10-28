@@ -1,0 +1,142 @@
+---
+- name: Validate exact firewall peers and the current bastion source
+  ansible.builtin.set_fact:
+    baseline_firewall_policy: >-
+      {{ {'nodes': baseline_node_addresses, 'controls': baseline_control_plane_addresses,
+          'bastions': baseline_bastion_cidrs, 'pods': baseline_pod_cidrs,
+          'role': baseline_node_role, 'source': baseline_admin_source_address,
+          'transport': baseline_cni_transport, 'ssh_port': baseline_ssh_port,
+          'api_port': baseline_api_port, 'kubelet_port': baseline_kubelet_port,
+          'nodeport_enabled': baseline_nodeport_enabled, 'nodeport_sources': baseline_nodeport_sources,
+          'nodeport_range': baseline_nodeport_range, 'metrics': baseline_metrics_to_kubelet}
+         | baseline_network_policy }}
+
+- name: Require the observed node identity and current SSH listener in policy
+  ansible.builtin.assert:
+    that:
+      - ansible_facts[baseline_expected_interface].ipv4.address in baseline_firewall_policy.nodes
+      - >-
+        (baseline_node_role == 'control_plane') ==
+        (ansible_facts[baseline_expected_interface].ipv4.address in baseline_firewall_policy.controls)
+      - baseline_ssh_connection.stdout.split()[3] | int == baseline_firewall_policy.ports.ssh_port
+    fail_msg: The node/interface role or current SSH listener does not match the declared firewall policy.
+
+- name: Inspect UFW status if installed
+  ansible.builtin.command: /usr/sbin/ufw status
+  check_mode: false
+  changed_when: false
+  register: baseline_ufw_status
+  when: "'ufw' in ansible_facts.packages"
+
+- name: Refuse competing active firewall managers
+  ansible.builtin.assert:
+    that:
+      - "'Status: active' not in (baseline_ufw_status.stdout | default(''))"
+      - ansible_facts.services.get('firewalld.service', {}).get('state', 'stopped') != 'running'
+      - ansible_facts.services.get('nftables.service', {}).get('state', 'stopped') != 'running'
+    fail_msg: Review and migrate the existing firewall explicitly; this role never flushes foreign rules.
+
+- name: Validate rendered firewall against the guest kernel without applying it
+  ansible.builtin.command:
+    argv: [/usr/sbin/nft, --check, --file, '-']
+    stdin: "{{ lookup('ansible.builtin.template', 'os-baseline.nft.j2') }}"
+  check_mode: false
+  changed_when: false
+  when: not ansible_check_mode or 'nftables' in ansible_facts.packages
+
+- name: Render the owned host-input firewall
+  ansible.builtin.template:
+    src: os-baseline.nft.j2
+    dest: /etc/os-baseline-firewall.nft
+    owner: root
+    group: root
+    mode: '0600'
+    validate: /usr/sbin/nft --check --file %s
+    backup: true
+  register: baseline_firewall_file
+
+- name: Render the dedicated firewall service without global ruleset flushing
+  ansible.builtin.template:
+    src: os-baseline-firewall.service.j2
+    dest: /etc/systemd/system/os-baseline-firewall.service
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  register: baseline_firewall_unit
+
+- name: Apply firewall with a timed rollback and fresh SSH verification
+  when:
+    - not ansible_check_mode
+    - >-
+      baseline_firewall_file.changed or baseline_firewall_unit.changed or
+      ansible_facts.services.get('os-baseline-firewall.service', {}).get('state') != 'running' or
+      ansible_facts.services.get('os-baseline-firewall.service', {}).get('status') != 'enabled'
+  block:
+    - name: Capture only this role's previous table
+      ansible.builtin.command: /usr/sbin/nft list table inet os_baseline
+      changed_when: false
+      failed_when: baseline_previous_firewall.rc not in [0, 1]
+      register: baseline_previous_firewall
+
+    - name: Save a table-scoped rollback transaction
+      ansible.builtin.copy:
+        dest: /run/os-baseline-firewall-rollback.nft
+        owner: root
+        group: root
+        mode: '0600'
+        content: |
+          add table inet os_baseline
+          delete table inet os_baseline
+          {{ baseline_previous_firewall.stdout if baseline_previous_firewall.rc == 0 else '' }}
+
+    - name: Save runtime and persistent firewall recovery script
+      ansible.builtin.template:
+        src: firewall-rollback.sh.j2
+        dest: /run/os-baseline-firewall-rollback.sh
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Arm automatic runtime and persistent rollback before firewall activation
+      ansible.builtin.command:
+        argv:
+          - systemd-run
+          - --collect
+          - --unit=os-baseline-firewall-rollback
+          - --on-active={{ baseline_firewall_rollback_seconds }}s
+          - /bin/sh
+          - /run/os-baseline-firewall-rollback.sh
+      changed_when: true
+
+    - name: Start the owned firewall service
+      ansible.builtin.systemd_service:
+        name: os-baseline-firewall
+        daemon_reload: "{{ baseline_firewall_unit.changed }}"
+        enabled: true
+        state: started
+
+    - name: Reload changed owned firewall rules atomically  # noqa: no-handler -- must precede fresh SSH verification and timer cancellation
+      ansible.builtin.systemd_service:
+        name: os-baseline-firewall
+        state: reloaded
+      when: baseline_firewall_file.changed
+
+    - name: Reset the connection before verifying the bastion allow rule
+      ansible.builtin.meta: reset_connection
+
+    - name: Require a fresh SSH connection through the new rules
+      ansible.builtin.wait_for_connection:
+        timeout: 45
+
+    - name: Cancel automatic rollback after fresh access succeeds
+      ansible.builtin.systemd_service:
+        name: os-baseline-firewall-rollback.timer
+        state: stopped
+
+  rescue:
+    - name: Report firewall rollback recovery requirements
+      ansible.builtin.fail:
+        msg: >-
+          Firewall verification failed. The scheduled runtime and persistent rollback remains armed;
+          inspect console and the os-baseline-firewall-rollback timer before retrying.

@@ -1,0 +1,27 @@
+#!/bin/sh
+# Restores only this role's table, file and unit; never flush the global ruleset.
+set -eu
+# Always attempt runtime recovery, even if a persistent-file/service operation fails.
+restore_table() {
+  /usr/sbin/nft --file /run/os-baseline-firewall-rollback.nft
+}
+trap restore_table 0
+systemctl stop os-baseline-firewall.service
+{% for result, path in [(baseline_firewall_file, '/etc/os-baseline-firewall.nft'), (baseline_firewall_unit, '/etc/systemd/system/os-baseline-firewall.service')] %}
+{% if result.backup_file is defined %}
+cp -- {{ result.backup_file | quote }} {{ path | quote }}
+{% elif result.changed %}
+rm -f -- {{ path | quote }}
+{% endif %}
+{% endfor %}
+systemctl daemon-reload
+{% set previous = ansible_facts.services.get('os-baseline-firewall.service', {}) %}
+{% if previous.get('status') == 'enabled' %}
+systemctl enable os-baseline-firewall.service
+{% else %}
+# The unit may have been removed above; remove just its owned enablement link.
+rm -f /etc/systemd/system/multi-user.target.wants/os-baseline-firewall.service
+{% endif %}
+{% if previous.get('state') == 'running' %}
+systemctl start os-baseline-firewall.service
+{% endif %}

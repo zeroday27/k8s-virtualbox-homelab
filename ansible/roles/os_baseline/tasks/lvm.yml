@@ -1,0 +1,141 @@
+---
+- name: Require explicit stable data-disk identities and a dedicated VG
+  ansible.builtin.assert:
+    that:
+      - baseline_lvm_devices | length > 0
+      - baseline_lvm_devices | select('match', '^/dev/disk/by-id/[A-Za-z0-9_.:-]+$') | list | length == baseline_lvm_devices | length
+      - baseline_lvm_vg is match('^[a-zA-Z][a-zA-Z0-9_]{0,30}$')
+      - baseline_lvm_volumes | length > 0
+    fail_msg: Only explicit /dev/disk/by-id whole data disks are supported; never reformat the root disk.
+
+- name: Validate absolute LV sizes and dedicated data mount paths
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-zA-Z][a-zA-Z0-9_]{0,30}$')
+      - item.size is match('^[1-9][0-9]*[gGmM]$')
+      - item.mount is match('^/srv/[a-zA-Z0-9_-]+$')
+      - item.fstype in ['ext4', 'xfs']
+      - item.opts == 'defaults,nodev,nosuid'
+  loop: '{{ baseline_lvm_volumes }}'
+
+- name: Require unique logical volume names and mount paths
+  ansible.builtin.assert:
+    that:
+      - baseline_lvm_volumes | map(attribute='name') | unique | length == baseline_lvm_volumes | length
+      - baseline_lvm_volumes | map(attribute='mount') | unique | length == baseline_lvm_volumes | length
+
+- name: Install explicit LVM prerequisites
+  ansible.builtin.apt:
+    name: [lvm2, xfsprogs]
+    state: present
+
+- name: Resolve declared disk symlinks
+  ansible.builtin.command:
+    argv: [readlink, -f, '{{ item }}']
+  loop: '{{ baseline_lvm_devices }}'
+  check_mode: false
+  changed_when: false
+  register: baseline_lvm_resolved
+
+- name: Observe block signatures and root-disk ancestry
+  ansible.builtin.command:
+    argv: [lsblk, --json, --paths, --output, 'NAME,TYPE,FSTYPE,MOUNTPOINTS']
+  check_mode: false
+  changed_when: false
+  register: baseline_lvm_blocks
+
+- name: Observe existing PV ownership
+  ansible.builtin.command:
+    argv: [pvs, --reportformat, json, --options, 'pv_name,vg_name']
+  check_mode: false
+  changed_when: false
+  register: baseline_lvm_pvs
+  when: not ansible_check_mode or 'lvm2' in ansible_facts.packages
+
+- name: Require a clean LVM device preflight before any storage change
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode or 'lvm2' in ansible_facts.packages
+      - >-
+        (baseline_lvm_blocks.stdout | from_json) | baseline_lvm_devices_safe(
+          baseline_lvm_resolved.results | map(attribute='stdout') | list,
+          (baseline_lvm_pvs.stdout | default('{"report":[{"pv":[]}]}') | from_json).report[0].pv,
+          baseline_lvm_vg)
+    fail_msg: LVM preflight rejected a root, occupied, partitioned or foreign-VG disk; no storage was changed.
+
+- name: Inspect all data-disk signatures without erasing them
+  ansible.builtin.command:
+    argv: [wipefs, --no-act, --json, '{{ item.stdout }}']
+  loop: '{{ baseline_lvm_resolved.results }}'
+  check_mode: false
+  changed_when: false
+  register: baseline_lvm_signatures
+
+- name: Reject signatures other than an already owned LVM PV
+  ansible.builtin.assert:
+    that: >-
+      ((item.stdout | from_json).signatures | default([]) | length == 0) or
+      (((item.stdout | from_json).signatures | map(attribute='type') | unique | list == ['LVM2_member']) and
+       (baseline_lvm_pvs.stdout | from_json).report[0].pv | selectattr('vg_name', 'equalto', baseline_lvm_vg) |
+       selectattr('pv_name', 'equalto', item.item.stdout) | list | length == 1)
+  loop: '{{ baseline_lvm_signatures.results }}'
+
+- name: Inspect declared mount directories
+  ansible.builtin.find:
+    paths: '{{ item.mount }}'
+    hidden: true
+    recurse: false
+    file_type: any
+  loop: '{{ baseline_lvm_volumes }}'
+  register: baseline_lvm_mount_contents
+
+- name: Refuse nonempty mount directories that would hide existing data
+  ansible.builtin.assert:
+    that: >-
+      (ansible_facts.mounts | selectattr('mount', 'equalto', item.item.mount) | list | length == 0 and item.matched == 0) or
+      (ansible_facts.mounts | selectattr('mount', 'equalto', item.item.mount) |
+       selectattr('device', 'in', ['/dev/' ~ baseline_lvm_vg ~ '/' ~ item.item.name,
+         '/dev/mapper/' ~ baseline_lvm_vg ~ '-' ~ item.item.name]) | list | length == 1)
+  loop: '{{ baseline_lvm_mount_contents.results }}'
+
+- name: Create the dedicated VG without removing other physical volumes
+  community.general.lvg:
+    vg: '{{ baseline_lvm_vg }}'
+    pvs: '{{ baseline_lvm_devices }}'
+    remove_extra_pvs: false
+    force: false
+  when: not ansible_check_mode
+
+- name: Create or grow absolute-size logical volumes without shrinking
+  community.general.lvol:
+    vg: '{{ baseline_lvm_vg }}'
+    lv: '{{ item.name }}'
+    size: '{{ item.size }}'
+    shrink: false
+    force: false
+    resizefs: true
+  loop: '{{ baseline_lvm_volumes }}'
+  when: not ansible_check_mode
+
+- name: Create data filesystems without forcing existing filesystem replacement
+  community.general.filesystem:
+    dev: '/dev/{{ baseline_lvm_vg }}/{{ item.name }}'
+    fstype: '{{ item.fstype }}'
+    force: false
+  loop: '{{ baseline_lvm_volumes }}'
+  when: not ansible_check_mode
+
+- name: Mount declared data volumes persistently
+  ansible.posix.mount:
+    path: '{{ item.mount }}'
+    src: '/dev/{{ baseline_lvm_vg }}/{{ item.name }}'
+    fstype: '{{ item.fstype }}'
+    opts: '{{ item.opts }}'
+    state: mounted
+  loop: '{{ baseline_lvm_volumes }}'
+  when: not ansible_check_mode
+
+- name: Report the validated storage plan without provisioning in check mode
+  ansible.builtin.debug:
+    msg: 'Storage preflight passed; requested {{ baseline_lvm_vg }} volumes: {{ baseline_lvm_volumes }}. No VG, LV, filesystem or mount was changed.'
+  when: ansible_check_mode
