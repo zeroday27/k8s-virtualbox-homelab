@@ -5,6 +5,70 @@
     name: "{{ baseline_hostname }}"
     use: systemd
 
+- name: Validate the shared hostname and static address records
+  ansible.builtin.set_fact:
+    baseline_validated_hosts_entries: '{{ baseline_hosts_entries | baseline_hosts_entries_safe }}'
+
+- name: Require this node's observed static address in the shared records
+  ansible.builtin.assert:
+    that:
+      - >-
+        baseline_validated_hosts_entries | selectattr('hostname', 'equalto', baseline_hostname) |
+        selectattr('address', 'equalto', ansible_facts[baseline_expected_interface].ipv4.address) | list | length == 1
+  when: baseline_validated_hosts_entries | length > 0
+
+- name: Remove this node's cloud-init loopback hostname record
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1(?:[ \t]+{{ baseline_hostname | regex_escape }})+[ \t]*(?:#.*)?$'
+    state: absent
+    backup: true
+  when: baseline_validated_hosts_entries | length > 0
+
+- name: Manage the shared node records while retaining other hosts entries
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: '# {mark} OS BASELINE CLUSTER HOSTS'
+    insertbefore: BOF
+    block: "{{ lookup('ansible.builtin.template', 'hosts-block.j2') }}"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  when: baseline_validated_hosts_entries | length > 0
+
+- name: Preserve node mappings in the cloud-init hosts template
+  when:
+    - baseline_validated_hosts_entries | length > 0
+    - "'cloud-init' in ansible_facts.packages"
+  block:
+    - name: Inspect the Ubuntu cloud-init hosts template
+      ansible.builtin.stat:
+        path: /etc/cloud/templates/hosts.debian.tmpl
+      register: baseline_cloud_hosts_template
+
+    - name: Require the supported cloud-init template before changing it
+      ansible.builtin.assert:
+        that: baseline_cloud_hosts_template.stat.isreg | default(false)
+
+    - name: Retain shared records when cloud-init regenerates hosts
+      ansible.builtin.blockinfile:
+        path: /etc/cloud/templates/hosts.debian.tmpl
+        marker: '# {mark} OS BASELINE CLUSTER HOSTS'
+        insertafter: '^## template:jinja$'
+        block: "{{ lookup('ansible.builtin.template', 'hosts-block.j2') }}"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+
+    - name: Remove cloud-init's generated loopback hostname mapping
+      ansible.builtin.lineinfile:
+        path: /etc/cloud/templates/hosts.debian.tmpl
+        regexp: '^127\.0\.1\.1[ \t]+\{\{[ \t]*fqdn[ \t]*\}\}[ \t]+\{\{[ \t]*hostname[ \t]*\}\}[ \t]*$'
+        state: absent
+        backup: true
+
 - name: Keep the local hostname resolvable
   ansible.builtin.lineinfile:
     path: /etc/hosts
@@ -13,6 +77,7 @@
     owner: root
     group: root
     mode: '0644'
+  when: baseline_validated_hosts_entries | length == 0
 
 - name: Set the configurable Bangkok default timezone
   community.general.timezone:

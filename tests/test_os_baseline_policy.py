@@ -151,3 +151,29 @@ class RecoveryTemplateTests(unittest.TestCase):
             dict(name='/dev/sdb', type='disk', fstype=None, mountpoints=[None])]}
         with self.assertRaises(AnsibleFilterError):
             POLICY.lvm_devices_safe(blocks, ['/dev/sdb'], [dict(pv_name='/dev/sda', vg_name='vg_k8s')], 'vg_k8s')
+
+
+class HostsEntryTests(unittest.TestCase):
+    def test_all_peers_render_in_one_stable_block(self):
+        entries = [dict(hostname='worker-02', address='192.0.2.22'),
+                   dict(hostname='control-01', address='192.0.2.11'),
+                   dict(hostname='worker-01', address='192.0.2.21')]
+        env = Environment(loader=FileSystemLoader(ROLE / 'templates'))
+        text = env.get_template('hosts-block.j2').render(
+            baseline_validated_hosts_entries=POLICY.hosts_entries_safe(entries))
+        self.assertEqual(text.splitlines(), ['192.0.2.11 control-01',
+                                            '192.0.2.21 worker-01', '192.0.2.22 worker-02'])
+
+    def test_ambiguous_and_unsafe_records_are_rejected(self):
+        record = dict(hostname='worker-01', address='192.0.2.21')
+        for records in [[record, record], [record, dict(hostname='worker-02', address='192.0.2.21')],
+                        [dict(hostname='worker-01\nadmin', address='192.0.2.21')],
+                        [dict(hostname='worker-01', address='127.0.0.1')],
+                        [dict(hostname='worker-01', address='192.0.2.21/24')],
+                        [dict(hostname='worker-01', address='192.0.2.21\n127.0.0.1')],
+                        [dict(hostname='worker-01')]]:
+            with self.subTest(records=records), self.assertRaises(AnsibleFilterError):
+                POLICY.hosts_entries_safe(records)
+
+    def test_empty_records_preserve_optional_role_behavior(self):
+        self.assertEqual(POLICY.hosts_entries_safe([]), [])

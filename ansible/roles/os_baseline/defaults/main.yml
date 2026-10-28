@@ -2,6 +2,7 @@
 # Confirm trusted SSH, sudo and a recovery console before any apply.
 baseline_access_verified: false
 baseline_admin_user: "{{ ansible_user }}"
+baseline_hosts_entries: []
 baseline_hostname: "{{ inventory_hostname }}"
 baseline_timezone: Asia/Bangkok
 baseline_ntp_servers: [ntp.ubuntu.com]

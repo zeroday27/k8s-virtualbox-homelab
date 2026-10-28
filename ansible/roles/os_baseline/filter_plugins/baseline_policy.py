@@ -94,6 +94,30 @@ def lvm_devices_safe(blocks, requested, pvs, vg):
         raise AnsibleFilterError(str(error)) from error
 
 
+def hosts_entries_safe(entries):
+    """Reject malformed or ambiguous name/address records before rendering hosts."""
+    try:
+        if not isinstance(entries, list):
+            raise ValueError('Declare a list of host records')
+        names, addresses, result = set(), set(), []
+        for entry in entries:
+            name, address = entry['hostname'], str(ipaddress.IPv4Address(entry['address']))
+            if not isinstance(name, str) or not re.fullmatch(r'[a-z]([a-z0-9-]{0,61}[a-z0-9])?', name):
+                raise ValueError('Use a valid lowercase short hostname')
+            ip = ipaddress.IPv4Address(address)
+            if ip.is_unspecified or ip.is_multicast or ip.is_loopback or ip.is_link_local or address == '255.255.255.255':
+                raise ValueError('Use a unicast node address')
+            if name in names or address in addresses:
+                raise ValueError('Duplicate hostname or node address')
+            names.add(name)
+            addresses.add(address)
+            result.append(dict(hostname=name, address=address))
+        return sorted(result, key=lambda record: record['hostname'])
+    except (KeyError, TypeError, ValueError) as error:
+        raise AnsibleFilterError(str(error)) from error
+
+
 class FilterModule:
     def filters(self):
-        return {'baseline_network_policy': network_policy, 'baseline_lvm_devices_safe': lvm_devices_safe}
+        return {'baseline_network_policy': network_policy, 'baseline_lvm_devices_safe': lvm_devices_safe,
+                'baseline_hosts_entries_safe': hosts_entries_safe}

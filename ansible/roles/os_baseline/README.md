@@ -117,3 +117,33 @@ Port scopes follow the [Kubernetes port reference](https://kubernetes.io/docs/re
 and [Calico requirements](https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements).
 See [nftables chain behavior](https://wiki.iptables.org/wiki-nftables/index.php/Configuring_chains)
 for interactions between independent base chains.
+
+## Shared host resolution
+
+Set `baseline_hosts_entries` in the ignored site variables. The same complete list
+is rendered on every node by `hosts-block.j2` inside a managed `/etc/hosts` block:
+
+```yaml
+baseline_hosts_entries:
+  - {hostname: k8s-control-plane-01, address: 192.0.2.11}
+  - {hostname: k8s-worker-01, address: 192.0.2.21}
+  - {hostname: k8s-worker-02, address: 192.0.2.22}
+```
+
+These are example addresses. Match each `hostname` to its `baseline_hostname`
+and `address` to its static node interface, never the NAT address. Each node
+checks its own observed address before staging the block. Duplicate names or
+addresses and invalid records are rejected. Other `/etc/hosts` records are
+preserved. The node's exact cloud-init loopback hostname record is removed so its
+own name resolves to the static node IP. Review any other conflicting custom
+records before apply. An empty list retains the previous local-hostname behavior.
+The same block is added to Ubuntu's cloud-init hosts template, preserving its
+Jinja header and removing its generated loopback hostname mapping. This handles
+existing seed data with `manage_etc_hosts: true` without changing seed identity.
+Kubernetes inventory rendering may manage this file later; keep both sources
+consistent.
+
+After an apply, verify each name on every node with `getent ahostsv4 HOSTNAME`.
+Check mode previews the block but cannot prove resolution or reboot persistence.
+
+The cloud-init integration follows its [hosts module documentation](https://docs.cloud-init.io/en/latest/reference/modules.html#update-etc-hosts).
