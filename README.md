@@ -37,6 +37,7 @@ share a contract, not provider-specific resource implementations.
 - [Image qualification contract](images/README.md)
 - [ARM64 lab template and clone workflow](images/virtualbox-arm64.md)
 - [Default three-node VirtualBox lab](docs/lab-single-control-plane.md)
+- [Ansible lab inventory and commands](ansible/inventory/lab/README.md)
 - [Optional five-node HA learning lab](docs/lab-profile.md)
 
 ## Profiles and support
