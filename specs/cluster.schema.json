@@ -1,0 +1,492 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "On-premises Kubernetes cluster intent",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "const": "onprem/v1alpha1"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "profile": {
+      "enum": [
+        "lab",
+        "production"
+      ]
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "virtualbox",
+            "proxmox"
+          ]
+        },
+        "architecture": {
+          "enum": [
+            "aarch64",
+            "x86_64"
+          ]
+        },
+        "cpu_model": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "architecture",
+        "cpu_model"
+      ]
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,62}$"
+        },
+        "os": {
+          "const": "Ubuntu"
+        },
+        "release": {
+          "const": "26.04"
+        },
+        "architecture": {
+          "enum": [
+            "aarch64",
+            "x86_64"
+          ]
+        },
+        "source_url": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "build_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "qualified": {
+          "type": "boolean"
+        },
+        "format": {
+          "enum": [
+            "iso",
+            "qcow2",
+            "vdi",
+            "vmdk",
+            "raw"
+          ]
+        },
+        "secure_boot": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "os",
+        "release",
+        "architecture",
+        "source_url",
+        "sha256",
+        "build_id",
+        "qualified",
+        "format",
+        "secure_boot"
+      ]
+    },
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kubespray_release": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kubernetes": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
+      },
+      "required": [
+        "kubespray_release",
+        "kubernetes"
+      ]
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "node_cidr": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pod_cidr": {
+          "type": "string",
+          "minLength": 1
+        },
+        "service_cidr": {
+          "type": "string",
+          "minLength": 1
+        },
+        "api_vip": {
+          "type": "string",
+          "format": "ipv4",
+          "description": "API endpoint address; node mode uses the sole control-plane IP. The legacy field name is retained for compatibility."
+        },
+        "api_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "dns_servers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "ntp_servers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "service_pool_start": {
+          "type": "string",
+          "format": "ipv4"
+        },
+        "service_pool_end": {
+          "type": "string",
+          "format": "ipv4"
+        },
+        "gateway": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "ipv4"
+        }
+      },
+      "required": [
+        "node_cidr",
+        "pod_cidr",
+        "service_cidr",
+        "api_vip",
+        "api_port",
+        "dns_servers",
+        "ntp_servers",
+        "service_pool_start",
+        "service_pool_end",
+        "gateway"
+      ]
+    },
+    "node_classes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,62}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cpus": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "memory_mib": {
+            "type": "integer",
+            "minimum": 1024
+          },
+          "root_disk_gib": {
+            "type": "integer",
+            "minimum": 8
+          },
+          "data_disks": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "required": [
+          "cpus",
+          "memory_mib",
+          "root_disk_gib",
+          "data_disks"
+        ]
+      }
+    },
+    "nodes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,62}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "control_plane",
+              "worker"
+            ]
+          },
+          "class": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "failure_domain": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$"
+          },
+          "hypervisor_host": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$"
+          },
+          "interface": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "role",
+          "class",
+          "ip",
+          "failure_domain",
+          "hypervisor_host",
+          "interface"
+        ]
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ssh_user": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_-]*$"
+        },
+        "management_cidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "secrets_encryption": {
+          "type": "boolean"
+        },
+        "audit": {
+          "type": "boolean"
+        },
+        "pod_security": {
+          "enum": [
+            "baseline",
+            "restricted"
+          ]
+        },
+        "oidc_issuer": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^https://"
+        },
+        "oidc_client_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ssh_user",
+        "management_cidrs",
+        "secrets_encryption",
+        "audit",
+        "pod_security",
+        "oidc_issuer",
+        "oidc_client_id"
+      ]
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cni": {
+          "enum": [
+            "flannel",
+            "calico",
+            "cilium"
+          ]
+        },
+        "api_endpoint": {
+          "enum": [
+            "kube_vip",
+            "external",
+            "node"
+          ]
+        },
+        "metallb": {
+          "type": "boolean"
+        },
+        "gitops": {
+          "enum": [
+            "none",
+            "flux",
+            "argocd"
+          ]
+        },
+        "gateway_api": {
+          "type": "boolean"
+        },
+        "cert_manager": {
+          "type": "boolean"
+        },
+        "metrics_server": {
+          "type": "boolean"
+        },
+        "monitoring": {
+          "type": "boolean"
+        },
+        "logging": {
+          "type": "boolean"
+        },
+        "policy_engine": {
+          "enum": [
+            "none",
+            "kyverno"
+          ]
+        },
+        "storage_driver": {
+          "enum": [
+            "none",
+            "local_path",
+            "csi_external"
+          ]
+        },
+        "storage_class": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "etcd_mode": {
+          "enum": [
+            "kubeadm",
+            "host"
+          ]
+        }
+      },
+      "required": [
+        "cni",
+        "api_endpoint",
+        "metallb",
+        "gitops",
+        "gateway_api",
+        "cert_manager",
+        "metrics_server",
+        "monitoring",
+        "logging",
+        "policy_engine",
+        "storage_driver",
+        "storage_class",
+        "etcd_mode"
+      ]
+    },
+    "dr": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "etcd_rpo_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "workload_rpo_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rto_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "restore_test_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "backup_target_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "independent_backup": {
+          "type": "boolean"
+        },
+        "evidence_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "etcd_rpo_minutes",
+        "workload_rpo_minutes",
+        "rto_minutes",
+        "restore_test_days",
+        "backup_target_ref",
+        "independent_backup",
+        "evidence_ref"
+      ]
+    }
+  },
+  "required": [
+    "api_version",
+    "name",
+    "profile",
+    "platform",
+    "image",
+    "versions",
+    "network",
+    "node_classes",
+    "nodes",
+    "security",
+    "components",
+    "dr"
+  ]
+}

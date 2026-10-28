@@ -1,0 +1,12 @@
+bucket                      = "terraform-state-example"
+key                         = "site-primary/cluster/terraform.tfstate"
+region                      = "us-east-1"
+use_lockfile                = true
+encrypt                    = true
+endpoints                   = { s3 = "https://state.example.invalid" }
+use_path_style              = true
+skip_credentials_validation = true
+skip_region_validation      = true
+skip_requesting_account_id  = true
+# These skip AWS-specific discovery, not TLS or S3 authentication.
+# Qualify conditional writes, encryption and versioning on the chosen object store.

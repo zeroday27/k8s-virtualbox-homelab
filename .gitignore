@@ -32,3 +32,14 @@ CLAUDE.md
 .codex/
 .local/
 plan/
+
+# Private environment inputs and local validation/runtime artifacts
+*.tfvars.json
+!*.tfvars.json.example
+*.backend.hcl
+.env.*
+!.env.example
+.venv-kubespray/
+reports/
+crash.log
+crash.*.log

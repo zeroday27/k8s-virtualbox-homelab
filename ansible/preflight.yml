@@ -1,15 +1,16 @@
 ---
-- name: Read-only guest checks after VM provisioning
+- name: Read-only guest qualification after provisioning
   hosts: all
   gather_facts: true
   become: false
   tasks:
-    - name: Verify expected Ubuntu ARM64 guest and memory allocation
+    - name: Verify declared OS, architecture, memory and node interface
       ansible.builtin.assert:
         that:
-          - ansible_facts['architecture'] == lab_expected_architecture
+          - ansible_facts['architecture'] == baseline_expected_architecture
           - ansible_facts['distribution'] == 'Ubuntu'
-          - ansible_facts['distribution_version'] == lab_expected_ubuntu_version
-          - ansible_facts['memtotal_mb'] >= 1800
+          - ansible_facts['distribution_version'] == baseline_expected_release
+          - ansible_facts['memtotal_mb'] >= (baseline_expected_memory_mib | int * 0.85)
           - ansible_host in ansible_facts['all_ipv4_addresses']
-        fail_msg: Check guest architecture, OS, memory and host-only static address.
+          - baseline_expected_interface in ansible_facts['interfaces']
+        fail_msg: Guest observations do not match the declared image, sizing or interface.

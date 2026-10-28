@@ -1,0 +1,136 @@
+{
+  "api_version": "onprem/v1alpha1",
+  "name": "production-example",
+  "profile": "production",
+  "platform": {
+    "kind": "proxmox",
+    "architecture": "x86_64",
+    "cpu_model": "x86-64-v2-AES"
+  },
+  "image": {
+    "key": "ubuntu-2604-amd64",
+    "os": "Ubuntu",
+    "release": "26.04",
+    "architecture": "x86_64",
+    "source_url": "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img",
+    "sha256": null,
+    "build_id": "candidate-ubuntu-2604-amd64",
+    "qualified": false,
+    "format": "qcow2",
+    "secure_boot": true
+  },
+  "versions": {
+    "kubespray_release": "v2.32.0",
+    "kubernetes": "1.36.4"
+  },
+  "network": {
+    "node_cidr": "192.168.56.0/24",
+    "pod_cidr": "10.244.0.0/16",
+    "service_cidr": "10.96.0.0/12",
+    "api_vip": "192.168.56.10",
+    "api_port": 6443,
+    "dns_servers": [
+      "192.168.56.53"
+    ],
+    "ntp_servers": [
+      "ntp.example.invalid"
+    ],
+    "service_pool_start": "192.168.56.200",
+    "service_pool_end": "192.168.56.219",
+    "gateway": "192.168.56.1"
+  },
+  "node_classes": {
+    "control-plane": {
+      "cpus": 4,
+      "memory_mib": 8192,
+      "root_disk_gib": 60,
+      "data_disks": {}
+    },
+    "worker": {
+      "cpus": 4,
+      "memory_mib": 8192,
+      "root_disk_gib": 80,
+      "data_disks": {
+        "scsi1": 100
+      }
+    }
+  },
+  "nodes": {
+    "cp1": {
+      "role": "control_plane",
+      "class": "control-plane",
+      "ip": "192.168.56.11",
+      "failure_domain": "pve-a",
+      "hypervisor_host": "pve-a",
+      "interface": "ens18"
+    },
+    "cp2": {
+      "role": "control_plane",
+      "class": "control-plane",
+      "ip": "192.168.56.12",
+      "failure_domain": "pve-b",
+      "hypervisor_host": "pve-b",
+      "interface": "ens18"
+    },
+    "cp3": {
+      "role": "control_plane",
+      "class": "control-plane",
+      "ip": "192.168.56.13",
+      "failure_domain": "pve-c",
+      "hypervisor_host": "pve-c",
+      "interface": "ens18"
+    },
+    "worker1": {
+      "role": "worker",
+      "class": "worker",
+      "ip": "192.168.56.21",
+      "failure_domain": "pve-a",
+      "hypervisor_host": "pve-a",
+      "interface": "ens18"
+    },
+    "worker2": {
+      "role": "worker",
+      "class": "worker",
+      "ip": "192.168.56.22",
+      "failure_domain": "pve-b",
+      "hypervisor_host": "pve-b",
+      "interface": "ens18"
+    }
+  },
+  "security": {
+    "ssh_user": "ubuntu",
+    "management_cidrs": [
+      "192.168.56.1/32"
+    ],
+    "secrets_encryption": true,
+    "audit": true,
+    "pod_security": "restricted",
+    "oidc_issuer": "https://identity.example.invalid",
+    "oidc_client_id": "kubernetes"
+  },
+  "components": {
+    "cni": "calico",
+    "api_endpoint": "kube_vip",
+    "metallb": true,
+    "gitops": "flux",
+    "gateway_api": true,
+    "cert_manager": true,
+    "metrics_server": true,
+    "monitoring": true,
+    "logging": true,
+    "policy_engine": "kyverno",
+    "storage_driver": "csi_external",
+    "storage_class": "site-csi",
+    "etcd_mode": "host"
+  },
+  "dr": {
+    "enabled": true,
+    "etcd_rpo_minutes": 15,
+    "workload_rpo_minutes": 15,
+    "rto_minutes": 240,
+    "restore_test_days": 30,
+    "backup_target_ref": "secret-ref://backup/site-independent",
+    "independent_backup": true,
+    "evidence_ref": null
+  }
+}

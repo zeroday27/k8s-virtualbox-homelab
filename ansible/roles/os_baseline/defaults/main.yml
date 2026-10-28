@@ -1,0 +1,8 @@
+---
+# Set this to a YAML/JSON boolean only after key-based SSH and sudo are tested.
+baseline_access_verified: false
+baseline_admin_user: "{{ ansible_user }}"
+baseline_ntp_servers: []
+baseline_journal_max_use: 256M
+baseline_journal_retention: 14day
+baseline_admin_source_address: "{{ (ansible_facts['env'].get('SSH_CONNECTION', '').split() | first) | default('') }}"

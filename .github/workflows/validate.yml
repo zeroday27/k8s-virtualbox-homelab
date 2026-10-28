@@ -1,18 +1,39 @@
-name: Validate scaffold
+name: Validate foundation
 on:
   push:
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   static:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.16.1
-      - run: terraform -chdir=terraform fmt -check
+      - run: python -m pip install --require-hashes -r requirements-dev.txt
+      - run: python scripts/check_public.py
+      - run: python scripts/specctl.py validate --spec specs/lab-virtualbox-single.json
+      - run: python scripts/specctl.py validate --spec specs/lab-virtualbox.json
+      - run: python scripts/specctl.py validate --spec specs/production-proxmox.example.json
+      - run: python -m unittest discover -s tests -v
+      - run: terraform fmt -check -recursive terraform
       - run: terraform -chdir=terraform init -backend=false
       - run: terraform -chdir=terraform validate
-      - run: python3 -m py_compile scripts/preflight.py
+      - run: terraform -chdir=terraform test -no-color
+      - run: terraform -chdir=terraform/adapters/proxmox init -backend=false -lockfile=readonly
+      - run: terraform -chdir=terraform/adapters/proxmox validate
+      - run: ansible-playbook -i 'localhost,' --syntax-check preflight.yml
+        working-directory: ansible
+      - run: ansible-playbook -i 'localhost,' --syntax-check playbooks/os-baseline.yml
+        working-directory: ansible
+      - run: bash -n scripts/fetch-kubespray.sh
+      - run: python -m py_compile scripts/preflight.py scripts/specctl.py scripts/check_public.py

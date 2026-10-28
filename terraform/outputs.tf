@@ -1,23 +1,18 @@
-output "ansible_inventory" {
-  description = "Inventory data only; the listed VMs are not provisioned by this scaffold."
-  value       = local.inventory
+output "intent" {
+  description = "Planning output only. No VM provider is called by this root module."
+  value       = module.cluster.intent
 }
 
 output "resource_budget" {
-  description = "Allocated guest resources and virtual disk maximums, not actual host disk usage."
-  value = {
-    nodes             = length(local.nodes)
-    vcpus             = sum([for node in local.nodes : node.cpus])
-    memory_mib        = sum([for node in local.nodes : node.memory_mib])
-    disk_capacity_gib = sum([for node in local.nodes : node.disk_gib])
-  }
+  description = "Guest allocation budget calculated from the selected specification."
+  value       = module.cluster.resource_budget
 }
 
 output "topology" {
-  description = "Proposed node configuration, API VIP and application pool."
+  description = "Proposed topology, API endpoint address (legacy api_vip field) and optional MetalLB pool."
   value = {
-    nodes         = local.nodes
-    api_vip       = local.api_vip
-    metallb_range = "${cidrhost(var.network_cidr, 200)}-${cidrhost(var.network_cidr, 219)}"
+    nodes         = module.cluster.intent.nodes
+    api_vip       = local.spec.network.api_vip
+    metallb_range = "${local.spec.network.service_pool_start}-${local.spec.network.service_pool_end}"
   }
 }

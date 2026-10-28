@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "qualification": "candidate",
+  "kubespray": {
+    "repository": "https://github.com/kubernetes-sigs/kubespray.git",
+    "release": "v2.32.0",
+    "commit": "9751ea6f63244e433a7a6263d9ecf381e57bb8e9",
+    "kubernetes": "1.36.4"
+  },
+  "proxmox_provider": {
+    "source": "bpg/proxmox",
+    "version": "0.118.0"
+  },
+  "addons": {
+    "qualification": "not-selected",
+    "note": "Select exact chart versions and image digests in a tested bundle before deployment. Kubespray owns CNI, containerd and kube-vip. GitOps owns additional components."
+  }
+}

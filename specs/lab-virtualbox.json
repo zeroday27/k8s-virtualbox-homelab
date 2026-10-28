@@ -1,0 +1,134 @@
+{
+  "api_version": "onprem/v1alpha1",
+  "name": "lab",
+  "profile": "lab",
+  "platform": {
+    "kind": "virtualbox",
+    "architecture": "aarch64",
+    "cpu_model": "native"
+  },
+  "image": {
+    "key": "ubuntu-2604-arm64",
+    "os": "Ubuntu",
+    "release": "26.04",
+    "architecture": "aarch64",
+    "source_url": "https://cdimage.ubuntu.com/releases/26.04/release/ubuntu-26.04.1-live-server-arm64.iso",
+    "sha256": "af78753c94b924c85c4964c670692a853f7c80299a4064e317edad95462e3168",
+    "build_id": "candidate-ubuntu-2604-arm64",
+    "qualified": false,
+    "format": "iso",
+    "secure_boot": false
+  },
+  "versions": {
+    "kubespray_release": "v2.32.0",
+    "kubernetes": "1.36.4"
+  },
+  "network": {
+    "node_cidr": "192.168.56.0/24",
+    "pod_cidr": "10.244.0.0/16",
+    "service_cidr": "10.96.0.0/12",
+    "api_vip": "192.168.56.10",
+    "api_port": 6443,
+    "dns_servers": [
+      "1.1.1.1"
+    ],
+    "ntp_servers": [
+      "ntp.ubuntu.com"
+    ],
+    "service_pool_start": "192.168.56.200",
+    "service_pool_end": "192.168.56.219",
+    "gateway": null
+  },
+  "node_classes": {
+    "control-plane": {
+      "cpus": 2,
+      "memory_mib": 2048,
+      "root_disk_gib": 16,
+      "data_disks": {}
+    },
+    "worker": {
+      "cpus": 1,
+      "memory_mib": 2048,
+      "root_disk_gib": 20,
+      "data_disks": {}
+    }
+  },
+  "nodes": {
+    "cp1": {
+      "role": "control_plane",
+      "class": "control-plane",
+      "ip": "192.168.56.11",
+      "failure_domain": "lab-host",
+      "hypervisor_host": "lab-host",
+      "interface": "lab0"
+    },
+    "cp2": {
+      "role": "control_plane",
+      "class": "control-plane",
+      "ip": "192.168.56.12",
+      "failure_domain": "lab-host",
+      "hypervisor_host": "lab-host",
+      "interface": "lab0"
+    },
+    "cp3": {
+      "role": "control_plane",
+      "class": "control-plane",
+      "ip": "192.168.56.13",
+      "failure_domain": "lab-host",
+      "hypervisor_host": "lab-host",
+      "interface": "lab0"
+    },
+    "worker1": {
+      "role": "worker",
+      "class": "worker",
+      "ip": "192.168.56.21",
+      "failure_domain": "lab-host",
+      "hypervisor_host": "lab-host",
+      "interface": "lab0"
+    },
+    "worker2": {
+      "role": "worker",
+      "class": "worker",
+      "ip": "192.168.56.22",
+      "failure_domain": "lab-host",
+      "hypervisor_host": "lab-host",
+      "interface": "lab0"
+    }
+  },
+  "security": {
+    "ssh_user": "ubuntu",
+    "management_cidrs": [
+      "192.168.56.1/32"
+    ],
+    "secrets_encryption": true,
+    "audit": false,
+    "pod_security": "baseline",
+    "oidc_issuer": null,
+    "oidc_client_id": null
+  },
+  "components": {
+    "cni": "calico",
+    "api_endpoint": "kube_vip",
+    "metallb": true,
+    "gitops": "none",
+    "gateway_api": false,
+    "cert_manager": false,
+    "metrics_server": false,
+    "monitoring": false,
+    "logging": false,
+    "policy_engine": "none",
+    "storage_driver": "none",
+    "storage_class": null,
+    "etcd_mode": "kubeadm"
+  },
+  "dr": {
+    "enabled": false,
+    "etcd_rpo_minutes": 15,
+    "workload_rpo_minutes": 60,
+    "rto_minutes": 240,
+    "restore_test_days": 30,
+    "backup_target_ref": null,
+    "independent_backup": false,
+    "evidence_ref": null
+  }
+}

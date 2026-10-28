@@ -1,0 +1,15 @@
+---
+- name: Restart chrony
+  ansible.builtin.service:
+    name: chrony
+    state: restarted
+
+- name: Restart journald
+  ansible.builtin.service:
+    name: systemd-journald
+    state: restarted
+
+- name: Load baseline sysctl settings
+  ansible.builtin.command:
+    argv: [/sbin/sysctl, --load=/etc/sysctl.d/60-onprem-security.conf]
+  changed_when: true
