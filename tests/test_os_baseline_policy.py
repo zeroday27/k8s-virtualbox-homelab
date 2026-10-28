@@ -38,6 +38,31 @@ class NetworkPolicyTests(unittest.TestCase):
         self.assertNotIn('hook forward', worker)
         self.assertNotIn('flush ruleset', worker.replace('# Only this table is replaced atomically. Never flush ruleset or CNI tables.', ''))
 
+    def test_only_reviewed_inbound_service_rules_are_rendered(self):
+        shared = {
+            'ip saddr @bastions tcp dport 22 accept',
+            'ip saddr @controls tcp dport 10250 accept',
+            'ip saddr @nodes tcp dport 179 accept',
+        }
+        control = {
+            'ip saddr @nodes tcp dport 6443 accept',
+            'ip saddr @bastions tcp dport 6443 accept',
+            'ip saddr { 10.244.0.0/16 } tcp dport 6443 accept',
+            'ip saddr @controls tcp dport { 2379, 2380 } accept',
+        }
+        for role, expected in [('control_plane', shared | control), ('worker', shared)]:
+            text = self.render(role=role)
+            tcp = {line.strip() for line in text.splitlines() if 'tcp dport' in line}
+            udp = {line.strip() for line in text.splitlines() if 'udp dport' in line}
+            with self.subTest(role=role):
+                self.assertEqual(tcp, expected)
+                self.assertEqual(udp, {'iifname "nat0" udp sport 67 udp dport 68 accept'})
+                self.assertIn('policy drop;', text)
+                self.assertNotIn('meta l4proto ipv6-icmp accept', text)
+                ipv6 = next(line for line in text.splitlines() if 'icmpv6 type' in line)
+                self.assertNotIn('echo-request', ipv6)
+                self.assertNotIn('echo-reply', ipv6)
+
     def test_transport_rules_are_scoped_to_selected_mode(self):
         ipip, vxlan = self.render(), self.render(transport='vxlan')
         self.assertIn('ip protocol 4 accept', ipip)

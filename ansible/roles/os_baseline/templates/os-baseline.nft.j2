@@ -13,7 +13,7 @@ table inet os_baseline {
     # DHCP renewal and essential network control traffic are not application listeners.
     iifname "nat0" udp sport 67 udp dport 68 accept
     ip protocol icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
-    meta l4proto ipv6-icmp accept
+    icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
     ip saddr @bastions tcp dport {{ baseline_firewall_policy.ports.ssh_port }} accept
     ip saddr @bastions icmp type echo-request accept
     ip saddr @nodes icmp type echo-request accept

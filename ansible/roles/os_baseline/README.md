@@ -50,7 +50,8 @@ or flushes the global ruleset. This implementation supports an IPv4 cluster.
 | NodePort TCP/UDP30000–32767 on workers | Disabled; requires `baseline_nodeport_enabled` and explicit `baseline_nodeport_sources` |
 
 Loopback, established/related traffic, NAT-interface DHCP renewal, essential ICMP
-errors/IPv6 control traffic and bastion/node ping are also allowed. No application
+errors, required IPv6 error/neighbor/router messages and bastion/node IPv4 ping
+are also allowed. Unrestricted IPv6 ICMP and IPv6 echo are not accepted. No application
 listeners are open over IPv6. Scheduler/controller-manager10259/10257 remain local;
 kube-proxy health10256 is not exposed to external load balancers in this profile.
 The DHCP interface defaults to the image's `nat0`; adjust the template if using a
