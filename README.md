@@ -7,9 +7,9 @@ provisioning. Public files contain generic examples only.
 **Status:** validated configuration foundation, not a qualified production
 platform. The default Terraform root only calculates intent. A Proxmox adapter
 is implemented for static/schema validation; it has not been applied to a
-hypervisor. Disposable guest checks are recorded privately and do not qualify a
-reusable template, OS baseline or Kubernetes cluster. Those remain unimplemented
-or unqualified.
+hypervisor. ARM64 lab template generalization and per-clone NoCloud seed tooling are
+implemented; runtime evidence remains private. An OS baseline, Kubernetes/CNI
+and a native VirtualBox Terraform adapter still require live qualification.
 
 ## Architecture
 
@@ -35,6 +35,7 @@ share a contract, not provider-specific resource implementations.
 - [Architecture, ownership and adapter contract](docs/architecture.md)
 - [Security, production acceptance and disaster recovery](docs/security-and-recovery.md)
 - [Image qualification contract](images/README.md)
+- [ARM64 lab template and clone workflow](images/virtualbox-arm64.md)
 - [Default three-node VirtualBox lab](docs/lab-single-control-plane.md)
 - [Optional five-node HA learning lab](docs/lab-profile.md)
 

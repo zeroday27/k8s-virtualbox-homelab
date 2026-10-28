@@ -35,7 +35,9 @@ For VirtualBox ARM, use Ubuntu Server ARM64 media; not AMD64 or Raspberry Pi med
 Oracle's built-in unattended installation is unavailable on ARM. Qualify Ubuntu
 autoinstall/NoCloud or a generalized base VM before implementing that adapter.
 
-An image factory (for example, Packer plus Ansible) is a subsequent implementation
-stage. No ISO, base image, Proxmox template or build pipeline is created here.
+The [VirtualBox ARM64 workflow](virtualbox-arm64.md) provides guarded guest
+generalization and private per-clone seed generation for a lab bootstrap image.
+Build artifacts and validation evidence stay outside public Git. A complete image
+factory, signed artifact attestations and Proxmox image builds remain later stages.
 Offline sites need verified mirrors of the installer, packages, runner wheels,
 Kubernetes binaries, container images and chart artifacts, with off-site copies.
