@@ -38,22 +38,8 @@
     mode: '0644'
   notify: Restart journald
 
-- name: Validate rendered logrotate policy without rotating logs
-  ansible.builtin.command:
-    argv: [/usr/sbin/logrotate, --debug, /dev/stdin]
-    stdin: "{{ lookup('ansible.builtin.template', 'logrotate.conf.j2') }}"
-  check_mode: false
-  changed_when: false
-  when: not ansible_check_mode or 'logrotate' in ansible_facts.packages
-
-- name: Configure system logrotate defaults while retaining package-specific rules
-  ansible.builtin.template:
-    src: logrotate.conf.j2
-    dest: /etc/logrotate.conf
-    owner: root
-    group: root
-    mode: '0644'
-    validate: /usr/sbin/logrotate --debug %s
+- name: Validate and configure logrotate
+  ansible.builtin.import_tasks: logrotate.yml
 
 - name: Bound auditd logs without halting a small lab on full disks
   ansible.builtin.lineinfile:

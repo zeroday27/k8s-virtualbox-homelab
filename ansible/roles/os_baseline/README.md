@@ -97,10 +97,14 @@ ansible-lint --offline -c .ansible-lint.yml playbooks/os-baseline.yml roles/os_b
 
 Keep `baseline_access_verified` false until access/recovery are verified, even for
 check mode. Check mode predicts package/configuration changes and runs read-only
-queries plus native nft, SSH-directive and logrotate syntax validation. It skips SSH reload, swapoff, firewall
-activation/rollback, sysctl application, handler restarts and storage provisioning.
-Absent-package audit configuration and services await an apply. Native validation runs separately using rendered content over stdin without
-activating it. SSH snippet syntax is checked in dry run; full effective SSH policy
+queries plus native nft, SSH-directive and logrotate validation. It skips SSH
+reload, swapoff, firewall activation/rollback, sysctl application, handler restarts
+and storage provisioning. Absent-package audit configuration and services await
+an apply. Native nft/SSH validation uses rendered content over stdin without
+activating it. Logrotate validation uses a temporary root-owned regular file, removed even
+on failure; logrotate ignores `/dev/stdin`. Debug mode uses `/dev/null` for state
+and rotates no logs. Its template retains Ubuntu's `su root adm` before package
+includes. SSH snippet syntax is checked in dry run; full effective SSH policy
 with existing includes is validated only on apply before reload.
 Ansible may create temporary module files; guest boot/log activity is expected.
 

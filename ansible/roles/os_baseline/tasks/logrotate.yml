@@ -1,0 +1,48 @@
+---
+- name: Validate rendered logrotate policy without rotating logs
+  check_mode: false
+  when: not ansible_check_mode or 'logrotate' in ansible_facts.packages
+  block:
+    - name: Allocate a regular file for logrotate validation
+      ansible.builtin.tempfile:
+        state: file
+        prefix: os-baseline-logrotate-
+        suffix: .conf
+      register: baseline_logrotate_candidate
+      changed_when: false
+
+    - name: Stage the rendered logrotate candidate securely
+      ansible.builtin.copy:
+        content: "{{ lookup('ansible.builtin.template', 'logrotate.conf.j2') }}"
+        dest: '{{ baseline_logrotate_candidate.path }}'
+        owner: root
+        group: root
+        mode: '0600'
+      changed_when: false
+
+    - name: Check the candidate with all installed package rules
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/logrotate
+          - --debug
+          - --state
+          - /dev/null
+          - '{{ baseline_logrotate_candidate.path }}'
+      changed_when: false
+
+  always:
+    - name: Remove the temporary logrotate candidate
+      ansible.builtin.file:
+        path: '{{ baseline_logrotate_candidate.path }}'
+        state: absent
+      changed_when: false
+      when: baseline_logrotate_candidate.path is defined
+
+- name: Configure system logrotate defaults while retaining package-specific rules
+  ansible.builtin.template:
+    src: logrotate.conf.j2
+    dest: /etc/logrotate.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/logrotate --debug --state /dev/null %s

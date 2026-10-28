@@ -177,3 +177,14 @@ class HostsEntryTests(unittest.TestCase):
 
     def test_empty_records_preserve_optional_role_behavior(self):
         self.assertEqual(POLICY.hosts_entries_safe([]), [])
+
+
+class LogrotateTemplateTests(unittest.TestCase):
+    def test_ubuntu_rotation_identity_precedes_package_includes(self):
+        env = Environment(loader=FileSystemLoader(ROLE / 'templates'), trim_blocks=True)
+        text = env.get_template('logrotate.conf.j2').render(
+            baseline_logrotate_frequency='daily', baseline_logrotate_keep=14,
+            baseline_logrotate_maxsize='50M')
+        directives = [line.strip() for line in text.splitlines() if line.strip() and not line.startswith('#')]
+        self.assertIn('su root adm', directives)
+        self.assertLess(directives.index('su root adm'), directives.index('include /etc/logrotate.d'))
