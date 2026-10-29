@@ -1,0 +1,23 @@
+---
+- name: Select the guest architecture without using the controller architecture
+  ansible.builtin.set_fact:
+    k8s_base_arch: '{{ ansible_facts.architecture | k8s_base_architecture }}'
+
+- name: Require the supported guest OS and release platform
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.system == 'Linux'
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '26.04'
+      - ('linux/' ~ k8s_base_arch) in k8s_base_bom.platforms
+      - k8s_base_bom.lifecycle_owner == 'kubeadm'
+      - groups.get('control_plane', []) | length == 1
+      - inventory_hostname in groups.get('lab_nodes', [])
+      - inventory_hostname is match('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+      - k8s_base_root == '/var/lib/k8s-base'
+      - k8s_base_cache == '/var/cache/k8s-base'
+      - k8s_base_calico_dir == '/opt/k8s-base/calico'
+
+- name: Select and validate this guest's locked executable artifacts
+  ansible.builtin.set_fact:
+    k8s_base_artifacts: '{{ k8s_base_bom | k8s_base_artifact_contract(k8s_base_arch) }}'

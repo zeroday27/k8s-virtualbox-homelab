@@ -30,7 +30,11 @@ check-terraform:
 
 check-ansible:
 	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/preflight.yml
-	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/os-baseline.yml
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/00-os-base.yml
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/01-k8s-base.yml
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/02-k8s-bootstrap.yml
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/03-k8s-calico.yml
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/04-k8s-shell.yml
 
 # Planning root only; this target never selects a provisioning adapter.
 plan:

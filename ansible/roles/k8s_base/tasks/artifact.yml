@@ -1,0 +1,46 @@
+---
+- name: Create this artifact's versioned staging directory
+  ansible.builtin.file:
+    path: '{{ k8s_base_cache }}/{{ k8s_base_artifact.name }}-{{ k8s_base_artifact.version }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Download the pinned upstream artifact with SHA256 verification
+  ansible.builtin.get_url:
+    url: '{{ k8s_base_artifact.url }}'
+    dest: '{{ k8s_base_cache }}/{{ k8s_base_artifact.name }}-{{ k8s_base_artifact.version }}/artifact'
+    checksum: 'sha256:{{ k8s_base_artifact.sha256 }}'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Extract verified archive contents in the owned staging directory
+  ansible.builtin.unarchive:
+    src: '{{ k8s_base_cache }}/{{ k8s_base_artifact.name }}-{{ k8s_base_artifact.version }}/artifact'
+    dest: '{{ k8s_base_cache }}/{{ k8s_base_artifact.name }}-{{ k8s_base_artifact.version }}'
+    remote_src: true
+    owner: root
+    group: root
+  when: k8s_base_artifact.kind == 'tar'
+
+- name: Install the selected versioned executable files
+  ansible.builtin.copy:
+    src: '{{ k8s_base_cache }}/{{ k8s_base_artifact.name }}-{{ k8s_base_artifact.version }}/{{ item.source }}'
+    dest: '{{ item.dest }}'
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  loop: '{{ k8s_base_artifact.files }}'
+  register: k8s_base_artifact_copy
+
+- name: Restart the runtime when its executables change
+  ansible.builtin.debug:
+    msg: Runtime executable changed.
+  changed_when: true
+  when:
+    - k8s_base_artifact.name in ['containerd', 'runc']
+    - k8s_base_artifact_copy.changed
+  notify: Restart the managed containerd service

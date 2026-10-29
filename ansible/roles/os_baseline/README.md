@@ -1,6 +1,6 @@
 # Reviewed Ubuntu OS baseline
 
-Run from `ansible/`; `playbooks/os-baseline.yml` applies this role serially, one
+Run from `ansible/`; `playbooks/00-os-base.yml` applies this role serially, one
 inventory host at a time. Ansible already iterates over hosts: `baseline_hostname`
 defaults to each `inventory_hostname`. Override it in `host_vars` if needed.
 The lab defaults select Asia/Bangkok and a restricted IPv4 host-input firewall.
@@ -89,10 +89,10 @@ build; this role does not migrate an installed root filesystem.
 ## Verification
 
 ```sh
-../.venv/bin/ansible-playbook playbooks/os-baseline.yml --syntax-check
-ansible-lint --offline -c .ansible-lint.yml playbooks/os-baseline.yml roles/os_baseline
-../.venv/bin/ansible-playbook playbooks/os-baseline.yml --check --diff --limit control_plane
-../.venv/bin/ansible-playbook playbooks/os-baseline.yml --check --diff
+../.venv/bin/ansible-playbook playbooks/00-os-base.yml --syntax-check
+ansible-lint --offline -c .ansible-lint.yml playbooks/00-os-base.yml roles/os_baseline
+../.venv/bin/ansible-playbook playbooks/00-os-base.yml --check --diff --limit control_plane
+../.venv/bin/ansible-playbook playbooks/00-os-base.yml --check --diff
 ```
 
 Keep `baseline_access_verified` false until access/recovery are verified, even for

@@ -1,0 +1,110 @@
+---
+- name: Require this worker and control-plane preflight context
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in groups.workers
+      - hostvars[groups.control_plane[0]].k8s_base_policy is defined
+      - k8s_base_membership is defined
+
+- name: Describe worker join without creating a bootstrap token in check mode
+  ansible.builtin.debug:
+    msg:
+      endpoint: '{{ hostvars[groups.control_plane[0]].k8s_base_policy.node_ip }}:6443'
+      node_ip: '{{ k8s_base_policy.node_ip }}'
+      architecture: '{{ k8s_base_arch }}'
+      discovery: Short-lived token with pinned CA public-key hash; no credentials created in check mode.
+  when: ansible_check_mode
+
+- name: Join a fresh worker and always remove its discovery credentials
+  when:
+    - not ansible_check_mode
+    - not k8s_base_membership.results[0].stat.exists
+  block:
+    - name: Create the private bootstrap directory
+      ansible.builtin.file:
+        path: '{{ k8s_base_bootstrap_dir }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Create a worker-specific short-lived discovery token
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubeadm
+          - token
+          - create
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - --ttl={{ k8s_base_join_token_ttl }}
+          - --description=Join {{ inventory_hostname }}
+      delegate_to: '{{ groups.control_plane[0] }}'
+      register: k8s_base_join_token
+      no_log: true
+      changed_when: true
+
+    - name: Validate the generated discovery token
+      ansible.builtin.assert:
+        that: k8s_base_join_token.stdout | trim is match('^[a-z0-9]{6}\.[a-z0-9]{16}$')
+      no_log: true
+
+    - name: Compute the trusted control-plane CA public-key hash
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt -noout |
+        openssl pkey -pubin -outform DER |
+        openssl dgst -sha256 -r | cut -d ' ' -f 1
+      args:
+        executable: /bin/bash
+      delegate_to: '{{ groups.control_plane[0] }}'
+      register: k8s_base_ca_hash
+      changed_when: false
+
+    - name: Require a valid discovery CA hash
+      ansible.builtin.assert:
+        that: k8s_base_ca_hash.stdout | trim is match('^[a-f0-9]{64}$')
+
+    - name: Render and validate private join configuration
+      ansible.builtin.template:
+        src: kubeadm-join.yml.j2
+        dest: '{{ k8s_base_bootstrap_dir }}/join.yaml'
+        owner: root
+        group: root
+        mode: '0600'
+        validate: /usr/local/bin/kubeadm config validate --config %s
+      no_log: true
+      diff: false
+
+    - name: Enable kubelet before joining
+      ansible.builtin.systemd_service:
+        name: kubelet
+        enabled: true
+        daemon_reload: true
+
+    - name: Join the worker with verified CA discovery
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubeadm, join, --config, '{{ k8s_base_bootstrap_dir }}/join.yaml']
+        creates: /etc/kubernetes/kubelet.conf
+      no_log: true
+
+    - name: Record the successful worker join
+      ansible.builtin.import_tasks: receipt.yml
+
+  always:
+    - name: Remove the private join configuration
+      ansible.builtin.file:
+        path: '{{ k8s_base_bootstrap_dir }}/join.yaml'
+        state: absent
+      no_log: true
+
+    - name: Revoke the worker discovery token even after join failure
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubeadm
+          - token
+          - delete
+          - '{{ k8s_base_join_token.stdout | trim }}'
+          - --kubeconfig=/etc/kubernetes/admin.conf
+      delegate_to: '{{ groups.control_plane[0] }}'
+      no_log: true
+      changed_when: true
+      when: k8s_base_join_token is defined and k8s_base_join_token.stdout is defined and k8s_base_join_token.stdout | trim | length > 0

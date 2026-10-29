@@ -1,0 +1,14 @@
+[Unit]
+Description=Kubernetes node agent
+After=containerd.service network-online.target
+Wants=network-online.target
+Requires=containerd.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/kubelet
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

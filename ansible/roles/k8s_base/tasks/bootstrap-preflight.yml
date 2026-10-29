@@ -1,0 +1,84 @@
+---
+- name: Validate platform and the existing firewall network contract
+  ansible.builtin.import_tasks: policy.yml
+
+- name: Require the complete lab inventory and reviewed bootstrap parameters
+  ansible.builtin.assert:
+    that:
+      - k8s_base_access_verified is sameas true
+      - ansible_user != 'root'
+      - groups.lab_nodes | difference(ansible_play_hosts_all) | length == 0
+      - groups.get('workers', []) | length == 2
+      - groups.lab_nodes | length == 3
+      - groups.control_plane | intersect(groups.workers) | length == 0
+      - >-
+        groups.lab_nodes | map('extract', hostvars) | map(attribute='k8s_base_policy.node_ip') |
+        unique | list | length == 3
+      - k8s_base_bootstrap_dir == '/var/lib/k8s-base/bootstrap'
+      - k8s_base_cri_socket == 'unix:///run/containerd/containerd.sock'
+      - k8s_base_cluster_name is match('^[a-z][a-z0-9-]{0,62}$')
+      - k8s_base_dns_domain is match('^[a-z0-9]+([.-][a-z0-9]+)*$')
+      - k8s_base_join_token_ttl == '10m'
+      - >-
+        k8s_base_bom.bootstrap_images.etcd == ('registry.k8s.io/etcd:' ~ k8s_base_bom.images['registry.k8s.io/etcd'].tag
+          ~ '@' ~ k8s_base_bom.images['registry.k8s.io/etcd'].digest)
+      - >-
+        k8s_base_bom.bootstrap_images.coredns == ('registry.k8s.io/coredns/coredns:' ~ k8s_base_bom.images['registry.k8s.io/coredns/coredns'].tag
+          ~ '@' ~ k8s_base_bom.images['registry.k8s.io/coredns/coredns'].digest)
+    fail_msg: Run bootstrap against the complete three-node inventory after reviewing access and the pinned BOM.
+
+- name: Inspect cluster membership before any node is changed
+  ansible.builtin.import_tasks: membership.yml
+
+- name: Inspect base binaries and ownership without installing them
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  loop:
+    - /var/lib/k8s-base/managed
+    - /usr/local/bin/kubeadm
+    - /usr/local/bin/kubelet
+    - /usr/local/bin/crictl
+  register: k8s_base_prerequisite_files
+
+- name: Require base installation before a real bootstrap
+  ansible.builtin.assert:
+    that: k8s_base_prerequisite_files.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: Apply and qualify 01-k8s-base.yml before bootstrap. Check mode can preview the plan without installed tools.
+  when: not ansible_check_mode
+
+- name: Read active swap without modifying it
+  ansible.builtin.command: swapon --show --noheadings --output NAME
+  register: k8s_base_bootstrap_swap
+  check_mode: false
+  changed_when: false
+
+- name: Require swap to remain disabled
+  ansible.builtin.assert:
+    that: k8s_base_bootstrap_swap.stdout | trim | length == 0
+
+- name: Verify installed tools and runtime before changing a cluster
+  when: not ansible_check_mode
+  block:
+    - name: Read the kubeadm version
+      ansible.builtin.command: /usr/local/bin/kubeadm version -o short
+      register: k8s_base_kubeadm_version
+      changed_when: false
+
+    - name: Read the kubelet version
+      ansible.builtin.command: /usr/local/bin/kubelet --version
+      register: k8s_base_kubelet_version
+      changed_when: false
+
+    - name: Read CRI readiness
+      ansible.builtin.command: /usr/local/bin/crictl info
+      register: k8s_base_bootstrap_cri
+      changed_when: false
+
+    - name: Require the pinned Kubernetes tools and a ready CRI
+      ansible.builtin.assert:
+        that:
+          - k8s_base_kubeadm_version.stdout | trim == ('v' ~ k8s_base_bom.versions.kubernetes)
+          - k8s_base_kubelet_version.stdout | trim == ('Kubernetes v' ~ k8s_base_bom.versions.kubernetes)
+          - >-
+            (k8s_base_bootstrap_cri.stdout | from_json).status.conditions |
+            selectattr('type', 'equalto', 'RuntimeReady') | selectattr('status', 'equalto', true) | list | length == 1

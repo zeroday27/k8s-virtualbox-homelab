@@ -1,0 +1,13 @@
+---
+- name: Load Kubernetes networking sysctls
+  ansible.builtin.command: /sbin/sysctl --load=/etc/sysctl.d/90-k8s-base.conf
+  changed_when: true
+  when: not ansible_check_mode
+
+- name: Restart the managed containerd service
+  ansible.builtin.systemd_service:
+    name: containerd
+    daemon_reload: true
+    state: restarted
+    enabled: true
+  when: not ansible_check_mode

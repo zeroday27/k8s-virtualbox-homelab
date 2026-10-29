@@ -1,0 +1,13 @@
+# Kubernetes shortcuts
+export KUBECONFIG={{ k8s_shell_kubeconfig | quote }}
+{% for name, command in k8s_shell_aliases.items() %}
+alias {{ name }}={{ command | quote }}
+{% endfor %}
+
+if command -v kubectl >/dev/null 2>&1; then
+    if ! declare -F _init_completion >/dev/null 2>&1; then
+        source /usr/share/bash-completion/bash_completion
+    fi
+    source <(kubectl completion bash)
+    complete -o default -F __start_kubectl k
+fi

@@ -1,0 +1,36 @@
+---
+- name: Validate the base installation contract
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Refresh apt metadata before installing prerequisites
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install the Kubernetes host prerequisites
+  ansible.builtin.apt:
+    name: '{{ k8s_base_required_packages }}'
+    state: present
+
+- name: Prepare kernel networking prerequisites
+  ansible.builtin.import_tasks: prerequisites.yml
+
+- name: Install locked artifacts and configure services
+  ansible.builtin.import_tasks: install.yml
+  when: not ansible_check_mode
+
+- name: Stage the Calico Kustomize overlay on the control plane
+  ansible.builtin.import_tasks: calico.yml
+  when: inventory_hostname in groups.get('control_plane', [])
+
+- name: Describe the base plan and check-mode limits
+  ansible.builtin.debug:
+    msg:
+      versions: '{{ k8s_base_bom.versions }}'
+      node_ip: '{{ k8s_base_node_ip }}'
+      admin_tools: "{{ inventory_hostname in groups.get('control_plane', []) }}"
+      containerd_config: "{{ lookup('ansible.builtin.template', 'containerd.toml.j2') }}"
+      next: >-
+        Base installation does not initialize or join Kubernetes. Calico is staged
+        only. Check mode validates contracts and predicts prerequisites/configuration;
+        artifact extraction, service activation, CRI and Kustomize build require apply.

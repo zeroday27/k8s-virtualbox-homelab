@@ -1,0 +1,11 @@
+---
+- name: Prepare the vanilla Kubernetes base without initializing a cluster
+  hosts: lab_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/k8s-base.bom.json
+  roles:
+    - role: k8s_base

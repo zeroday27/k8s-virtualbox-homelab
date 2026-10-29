@@ -4,7 +4,8 @@
 
 Build replaceable on-premises Kubernetes environments from versioned intent:
 Terraform provisions the required VMs; Ansible establishes the OS baseline;
-pinned Kubespray manages Kubernetes lifecycle; GitOps reconciles platform add-ons.
+the production scaffold uses pinned Kubespray, while the vanilla lab uses kubeadm;
+GitOps reconciles platform add-ons.
 Recovery reconstructs infrastructure and restores application state from independent
 backups. The deliverable is a reproducible, tested release, not a universal claim
 that every hypervisor, image or plugin works.
@@ -22,7 +23,8 @@ This is upstream compatibility evidence, not our runtime qualification.
 | Image factory | Generalized source-to-artifact provenance, bootstrap prerequisites, qualification | Live cluster membership or secrets |
 | Terraform adapter | VM identity, sizing, disks, NICs, placement, lifecycle observations | SSH shell provisioning or kubeadm execution |
 | OS baseline | SSH authentication policy, selected kernel protections, time sync, auditing and bounded host logs | Unreviewed benchmark remediation, CNI firewall rules or automatic reboots |
-| Kubespray | Kubernetes bootstrap/upgrade, containerd, CNI, control-plane endpoint and etcd mode | Customer applications and independent backup storage |
+| Kubespray production scaffold | Kubernetes bootstrap/upgrade, containerd, CNI, control-plane endpoint and etcd mode | Vanilla kubeadm lab and customer applications |
+| Vanilla lab base | Upstream runtime/tools and staged Calico; kubeadm owns later cluster lifecycle | Production scaffold, automatic init/join or upgrades |
 | GitOps | MetalLB, Gateway API implementation, certificates, policy, monitoring, logs and CSI integrations | Hypervisor lifecycle or secret plaintext |
 | Recovery operations | Fencing, isolated restore, data validation, cutover and failback | Automatic failover with unproven data consistency |
 
@@ -177,3 +179,11 @@ exercises, with no second owner installing MetalLB or kube-vip Services.
 - [Pinned etcd deployment modes](https://github.com/kubernetes-sigs/kubespray/blob/v2.32.0/docs/operations/etcd.md)
 - [Pinned kube-vip integration](https://github.com/kubernetes-sigs/kubespray/blob/v2.32.0/docs/ingress/kube-vip.md)
 - [Proxmox VM provider schema](https://github.com/bpg/terraform-provider-proxmox/blob/v0.118.0/docs/resources/virtual_environment_vm.md)
+
+## Vanilla Kubernetes lab base
+
+The single-control-plane lab has a separate kubeadm-owned base, bootstrap and
+Calico profile with ARM64 and AMD64 artifact selection.
+See [the role guide](../ansible/roles/k8s_base/README.md) for pinned components, variables, check mode and the explicit Calico phase.
+This does not replace the existing Kubespray production scaffold or its release lock.
+Base preparation does not initialize a cluster.

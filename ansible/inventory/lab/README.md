@@ -33,8 +33,9 @@ After starting the required lab VMs, verify access and the guest contract:
 
 Use `--limit control_plane`, `--limit workers` or a specific host name for
 subsequent tasks. Preflight is read-only. OS baseline access gates still apply.
-This is a guest-management inventory; Kubernetes deployment still requires the
-release-gated specification/observation workflow and its separate pinned runner.
+This is a guest-management inventory. The vanilla lab uses the separate
+[kubeadm base and bootstrap phases](../../roles/k8s_base/README.md); the production
+scaffold retains its independently pinned Kubespray runner.
 There is no duplicate configuration at the repository root. To run from another
 directory, explicitly select this config, for example from the repository root:
 
@@ -49,3 +50,12 @@ Baseline defaults live in `group_vars/lab_nodes/00-baseline.yml`; actual bastion
 peer addresses belong in ignored `group_vars/lab_nodes/90-site.local.yml`. See the
 [baseline variable and firewall guide](../../roles/os_baseline/README.md) before
 check mode or apply. Install `ansible/requirements.yml` collections first.
+
+The checked-in inventory defaults to ARM64. For AMD64 guests use a private
+inventory with `baseline_expected_architecture: x86_64`, and the observed
+`baseline_expected_interface` for each host. With mixed CPU or NIC types set
+these per host. Keep that inventory under `.local/` (ignored), explicitly select
+it with `-i`, and include the reviewed private baseline/network variables there.
+Do not publish real addresses. Kubernetes roles detect CPU from guest facts;
+VM images must be built separately for ARM64 and AMD64. Bootstrap and Calico
+preflight require the complete inventory and reject `--limit`.

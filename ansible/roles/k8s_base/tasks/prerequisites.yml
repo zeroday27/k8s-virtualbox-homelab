@@ -1,0 +1,30 @@
+---
+- name: Persist required kernel modules
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s-base.conf
+    content: "overlay\nbr_netfilter\nipip\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Load required kernel modules
+  community.general.modprobe:
+    name: '{{ item }}'
+    state: present
+  loop: [overlay, br_netfilter, ipip]
+  when: not ansible_check_mode
+
+- name: Persist Kubernetes networking sysctls
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-k8s-base.conf
+    content: |
+      net.ipv4.ip_forward = 1
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Load Kubernetes networking sysctls
+
+- name: Apply prerequisite handlers before configuring the runtime
+  ansible.builtin.meta: flush_handlers

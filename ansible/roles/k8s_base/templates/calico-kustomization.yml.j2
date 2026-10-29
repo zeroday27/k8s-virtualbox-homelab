@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - calico.yaml
+images:
+{% for name, image in k8s_base_bom.images.items() if name.startswith('quay.io/calico/') %}
+  - name: {{ name }}
+    digest: {{ image.digest }}
+{% endfor %}
+patches:
+  - target:
+      kind: DaemonSet
+      name: calico-node
+    patch: |-
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: calico-node
+      spec:
+        template:
+          spec:
+            containers:
+              - name: calico-node
+                env:
+                  - name: IP_AUTODETECTION_METHOD
+                    value: "kubernetes-internal-ip"
+                  - name: CALICO_IPV4POOL_CIDR
+                    value: "{{ k8s_base_pod_cidr }}"
+                  - name: CALICO_IPV4POOL_IPIP
+                    value: "Always"
+                  - name: CALICO_IPV4POOL_VXLAN
+                    value: "Never"

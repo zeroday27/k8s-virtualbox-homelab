@@ -1,0 +1,14 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: {{ (hostvars[groups.control_plane[0]].k8s_base_policy.node_ip ~ ':6443') | to_json }}
+    token: {{ k8s_base_join_token.stdout | trim | to_json }}
+    caCertHashes:
+      - {{ ('sha256:' ~ k8s_base_ca_hash.stdout | trim) | to_json }}
+nodeRegistration:
+  name: {{ inventory_hostname | to_json }}
+  criSocket: {{ k8s_base_cri_socket | to_json }}
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ k8s_base_policy.node_ip | to_json }}

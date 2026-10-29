@@ -34,7 +34,15 @@ jobs:
       - run: terraform -chdir=terraform/adapters/proxmox validate
       - run: ansible-playbook -i 'localhost,' --syntax-check preflight.yml
         working-directory: ansible
-      - run: ansible-playbook -i 'localhost,' --syntax-check playbooks/os-baseline.yml
+      - run: ansible-playbook -i 'localhost,' --syntax-check playbooks/00-os-base.yml
+        working-directory: ansible
+      - run: ansible-playbook -i 'localhost,' --syntax-check playbooks/01-k8s-base.yml
+        working-directory: ansible
+      - run: ansible-playbook -i 'localhost,' --syntax-check playbooks/02-k8s-bootstrap.yml
+        working-directory: ansible
+      - run: ansible-playbook -i 'localhost,' --syntax-check playbooks/03-k8s-calico.yml
+        working-directory: ansible
+      - run: ansible-playbook -i 'localhost,' --syntax-check playbooks/04-k8s-shell.yml
         working-directory: ansible
       - run: bash -n scripts/fetch-kubespray.sh
       - run: python -m py_compile scripts/preflight.py scripts/specctl.py scripts/check_public.py

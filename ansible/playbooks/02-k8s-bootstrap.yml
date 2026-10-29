@@ -1,0 +1,40 @@
+---
+- name: Validate all nodes before any cluster bootstrap changes
+  hosts: lab_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/k8s-base.bom.json
+  tasks:
+    - name: Check bootstrap prerequisites
+      ansible.builtin.include_role:
+        name: k8s_base
+        tasks_from: bootstrap-preflight.yml
+
+- name: Initialize the single control plane
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/k8s-base.bom.json
+  tasks:
+    - name: Prepare or initialize the control plane
+      ansible.builtin.include_role:
+        name: k8s_base
+        tasks_from: init.yml
+
+- name: Join workers one at a time using short-lived discovery credentials
+  hosts: workers
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/k8s-base.bom.json
+  tasks:
+    - name: Prepare or join this worker
+      ansible.builtin.include_role:
+        name: k8s_base
+        tasks_from: join.yml

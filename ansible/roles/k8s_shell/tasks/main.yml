@@ -1,0 +1,84 @@
+---
+- name: Look up the target user's real account settings
+  ansible.builtin.getent:
+    database: passwd
+    key: '{{ k8s_shell_user }}'
+
+- name: Require an existing non-root Bash user on the control plane
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in groups.get('control_plane', [])
+      - k8s_shell_user is match('^[a-z_][a-z0-9_-]*$')
+      - ansible_facts.getent_passwd[k8s_shell_user][1] | int > 0
+      - ansible_facts.getent_passwd[k8s_shell_user][5] in ['/bin/bash', '/usr/bin/bash']
+      - k8s_shell_aliases.k == 'kubectl'
+    fail_msg: This shell profile requires an existing non-root Bash account on the control plane.
+
+- name: Require an explicit kubeconfig path
+  ansible.builtin.assert:
+    that:
+      - k8s_shell_kubeconfig is string
+      - k8s_shell_kubeconfig is match('^/')
+      - "'\n' not in k8s_shell_kubeconfig"
+
+- name: Require the user's kubeconfig to be readable without sudo
+  ansible.builtin.command:
+    argv: [/usr/bin/test, -r, '{{ k8s_shell_kubeconfig }}']
+  become: true
+  become_user: '{{ k8s_shell_user }}'
+  check_mode: false
+  changed_when: false
+
+- name: Validate the alias names and values
+  ansible.builtin.assert:
+    that:
+      - item.key is match('^[a-z][a-z0-9_]*$')
+      - item.value is string
+      - item.value | length > 0
+      - "'\n' not in item.value"
+  loop: '{{ k8s_shell_aliases | dict2items }}'
+  loop_control:
+    label: '{{ item.key }}'
+
+- name: Inspect the profile files before changing them
+  ansible.builtin.stat:
+    path: '{{ ansible_facts.getent_passwd[k8s_shell_user][4] }}/{{ item }}'
+    follow: false
+  loop: [.bashrc, .bash_aliases]
+  register: k8s_shell_profiles
+
+- name: Require regular profile files rather than following symlinks
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or item.stat.isreg | default(false)
+      - not item.stat.islnk | default(false)
+  loop: '{{ k8s_shell_profiles.results }}'
+  loop_control:
+    label: '{{ item.item }}'
+
+- name: Ensure Bash completion support is installed
+  ansible.builtin.apt:
+    name: bash-completion
+    state: present
+
+- name: Manage kubeconfig export, aliases and Bash completion in a bounded block
+  ansible.builtin.blockinfile:
+    path: '{{ ansible_facts.getent_passwd[k8s_shell_user][4] }}/.bash_aliases'
+    create: true
+    owner: '{{ k8s_shell_user }}'
+    group: '{{ ansible_facts.getent_passwd[k8s_shell_user][2] }}'
+    mode: '0644'
+    marker: '# {mark} ANSIBLE MANAGED K8S SHELL'
+    block: "{{ lookup('ansible.builtin.template', 'aliases.bash.j2') }}"
+    validate: /bin/bash -n %s
+
+- name: Ensure interactive Bash loads the alias file
+  ansible.builtin.lineinfile:
+    path: '{{ ansible_facts.getent_passwd[k8s_shell_user][4] }}/.bashrc'
+    create: true
+    owner: '{{ k8s_shell_user }}'
+    group: '{{ ansible_facts.getent_passwd[k8s_shell_user][2] }}'
+    mode: '0644'
+    regexp: '^\s*(?:\.|source)\s+~/\.bash_aliases\s*$'
+    line: '    . ~/.bash_aliases'
+    validate: /bin/bash -n %s

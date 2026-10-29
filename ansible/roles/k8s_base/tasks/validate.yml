@@ -1,0 +1,68 @@
+---
+- name: Select the supported platform and locked artifacts
+  ansible.builtin.import_tasks: platform.yml
+
+- name: Require verified non-root administrative access
+  ansible.builtin.assert:
+    that:
+      - k8s_base_access_verified is sameas true
+      - ansible_user != 'root'
+
+- name: Validate network policy and baseline agreement
+  ansible.builtin.import_tasks: policy.yml
+
+- name: Inspect existing cluster and runtime ownership markers
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  loop:
+    - /etc/kubernetes/kubelet.conf
+    - /etc/kubernetes/admin.conf
+    - /var/lib/etcd/member
+    - /var/lib/k8s-base/managed
+    - /etc/containerd/config.toml
+    - /usr/local/bin/containerd
+    - /usr/local/bin/kubelet
+    - /usr/local/sbin/runc
+    - /usr/local/bin/crictl
+    - /usr/local/bin/kubeadm
+    - /usr/local/bin/kubectl
+    - /usr/local/bin/kustomize
+    - /etc/systemd/system/containerd.service
+    - /etc/systemd/system/kubelet.service
+    - /etc/crictl.yaml
+  register: k8s_base_existing
+
+- name: Refuse joined nodes or an unowned runtime installation
+  ansible.builtin.assert:
+    that:
+      - not k8s_base_existing.results[0].stat.exists
+      - not k8s_base_existing.results[1].stat.exists
+      - not k8s_base_existing.results[2].stat.exists
+      - >-
+        k8s_base_existing.results[3].stat.exists or
+        not (k8s_base_existing.results[4:] | selectattr('stat.exists') | list | length > 0)
+    fail_msg: Joined clusters and existing runtimes require a separate reviewed upgrade or adoption workflow.
+
+- name: Observe package ownership before using upstream binaries
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Refuse mixing packaged runtimes or Kubernetes binaries with this role
+  ansible.builtin.assert:
+    that:
+      - "'containerd' not in ansible_facts.packages"
+      - "'containerd.io' not in ansible_facts.packages"
+      - "'runc' not in ansible_facts.packages"
+      - "'kubelet' not in ansible_facts.packages"
+      - "'kubeadm' not in ansible_facts.packages"
+    fail_msg: Review and migrate package-managed installations explicitly; no packages are removed automatically.
+
+- name: Read active swap without modifying it
+  ansible.builtin.command: swapon --show --noheadings --output NAME
+  check_mode: false
+  changed_when: false
+  register: k8s_base_swap
+
+- name: Require the OS baseline swap policy
+  ansible.builtin.assert:
+    that: k8s_base_swap.stdout | trim | length == 0

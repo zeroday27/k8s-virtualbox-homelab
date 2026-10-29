@@ -1,0 +1,29 @@
+---
+- name: Select the supported guest platform
+  ansible.builtin.import_tasks: platform.yml
+
+- name: Validate node addressing and CNI parameters
+  ansible.builtin.set_fact:
+    k8s_base_policy: >-
+      {{ {'node_ip': k8s_base_node_ip, 'pod_cidr': k8s_base_pod_cidr,
+          'service_cidr': k8s_base_service_cidr, 'interface': k8s_base_node_interface,
+          'transport': k8s_base_cni_transport} | k8s_base_network_policy }}
+
+- name: Require the existing firewall to match the chosen Calico transport
+  ansible.builtin.assert:
+    that:
+      - k8s_base_cni_transport == (baseline_cni_transport | default('ipip'))
+      - k8s_base_pod_cidr in (baseline_pod_cidrs | default(['10.244.0.0/16']))
+      - k8s_base_bom.calico_manifest.url is match('^https://raw\.githubusercontent\.com/projectcalico/calico/v[0-9.]+/manifests/calico\.yaml$')
+      - k8s_base_bom.calico_manifest.sha256 is match('^[a-f0-9]{64}$')
+      - k8s_base_kubeconfig == '/etc/kubernetes/admin.conf'
+      - k8s_base_calico_apply is boolean
+
+- name: Require immutable images for the selected guest architecture
+  ansible.builtin.assert:
+    that:
+      - item.value.digest is match('^sha256:[a-f0-9]{64}$')
+      - item.value.architectures[k8s_base_arch] is match('^sha256:[a-f0-9]{64}$')
+  loop: '{{ k8s_base_bom.images | dict2items }}'
+  loop_control:
+    label: '{{ item.key }}'

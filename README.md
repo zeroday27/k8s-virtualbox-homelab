@@ -130,3 +130,14 @@ Kubernetes cluster.
 A single physical host demonstrates node-failure exercises; it cannot satisfy
 production host/site resilience. Production readiness is a measured release
 outcome, not a profile name or a successful Terraform apply.
+
+## Vanilla Kubernetes lab base
+
+The single-control-plane lab has a separate kubeadm-owned base, bootstrap and
+Calico profile with ARM64 and AMD64 artifact selection.
+See [the role guide](ansible/roles/k8s_base/README.md) for pinned components, variables, check mode and the explicit Calico phase.
+This does not replace the existing Kubespray production scaffold or its release lock.
+Base preparation does not initialize a cluster.
+
+The [numbered Ansible playbooks](ansible/playbooks/README.md) document the lab’s
+00–04 execution order and map each phase to its reusable role.

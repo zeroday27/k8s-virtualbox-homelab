@@ -1,0 +1,27 @@
+---
+- name: Validate all lab nodes before the explicit CNI phase
+  hosts: lab_nodes
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/k8s-base.bom.json
+  tasks:
+    - name: Check the node prerequisites and existing membership
+      ansible.builtin.include_role:
+        name: k8s_base
+        tasks_from: bootstrap-preflight.yml
+
+- name: Apply the reviewed Calico overlay to an initialized cluster
+  hosts: control_plane
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../vars/k8s-base.bom.json
+  tasks:
+    - name: Apply only the Calico phase of the base role
+      ansible.builtin.include_role:
+        name: k8s_base
+        tasks_from: calico.yml
+      vars:
+        k8s_base_calico_apply: true

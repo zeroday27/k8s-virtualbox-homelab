@@ -1,0 +1,13 @@
+---
+- name: Record the completed bootstrap identity without credentials
+  ansible.builtin.copy:
+    dest: '{{ k8s_base_bootstrap_dir }}/receipt.json'
+    content: >-
+      {{ {'version': k8s_base_bom.versions.kubernetes, 'node': inventory_hostname,
+          'node_ip': k8s_base_policy.node_ip, 'architecture': k8s_base_arch,
+          'control_plane_ip': hostvars[groups.control_plane[0]].k8s_base_policy.node_ip,
+          'cluster_name': k8s_base_cluster_name, 'dns_domain': k8s_base_dns_domain,
+          'pod_cidr': k8s_base_pod_cidr, 'service_cidr': k8s_base_service_cidr} | to_nice_json }}
+    owner: root
+    group: root
+    mode: '0600'

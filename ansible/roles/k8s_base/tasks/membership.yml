@@ -1,0 +1,44 @@
+---
+- name: Inspect existing cluster membership and the bootstrap receipt
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  loop:
+    - '{{ k8s_base_bootstrap_dir }}/receipt.json'
+    - /etc/kubernetes/kubelet.conf
+    - /etc/kubernetes/admin.conf
+    - /etc/kubernetes/manifests/kube-apiserver.yaml
+    - /var/lib/etcd/member
+  register: k8s_base_membership
+
+- name: Refuse partial or unowned cluster membership without resetting it
+  ansible.builtin.assert:
+    that:
+      - >-
+        k8s_base_membership.results[0].stat.exists or
+        not (k8s_base_membership.results[1:] | selectattr('stat.exists') | list | length > 0)
+      - not k8s_base_membership.results[0].stat.exists or k8s_base_membership.results[1].stat.exists
+    fail_msg: Existing or partially initialized membership needs manual review; this play never runs kubeadm reset.
+
+- name: Validate an existing role-owned membership receipt
+  when: k8s_base_membership.results[0].stat.exists
+  block:
+    - name: Read the bootstrap receipt
+      ansible.builtin.slurp:
+        src: '{{ k8s_base_bootstrap_dir }}/receipt.json'
+      register: k8s_base_receipt_file
+
+    - name: Require the same version and node identity for a repeated bootstrap
+      ansible.builtin.assert:
+        that:
+          - (k8s_base_receipt_file.content | b64decode | from_json).version == k8s_base_bom.versions.kubernetes
+          - (k8s_base_receipt_file.content | b64decode | from_json).node == inventory_hostname
+          - (k8s_base_receipt_file.content | b64decode | from_json).node_ip == k8s_base_policy.node_ip
+          - (k8s_base_receipt_file.content | b64decode | from_json).pod_cidr == k8s_base_pod_cidr
+          - (k8s_base_receipt_file.content | b64decode | from_json).service_cidr == k8s_base_service_cidr
+          - (k8s_base_receipt_file.content | b64decode | from_json).architecture == k8s_base_arch
+          - (k8s_base_receipt_file.content | b64decode | from_json).cluster_name == k8s_base_cluster_name
+          - (k8s_base_receipt_file.content | b64decode | from_json).dns_domain == k8s_base_dns_domain
+          - >-
+            (k8s_base_receipt_file.content | b64decode | from_json).control_plane_ip ==
+            hostvars[groups.control_plane[0]].k8s_base_policy.node_ip
+        fail_msg: Existing membership does not match this bootstrap plan. Use a reviewed upgrade or migration workflow.

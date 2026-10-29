@@ -1,0 +1,18 @@
+---
+k8s_shell_user: '{{ ansible_user }}'
+k8s_shell_kubeconfig: '{{ ansible_facts.getent_passwd[k8s_shell_user][4] }}/.kube/config'
+k8s_shell_aliases:
+  k: kubectl
+  kg: kubectl get
+  kgp: kubectl get pods
+  kgn: kubectl get nodes
+  kgs: kubectl get services
+  kgns: kubectl get namespace
+  kga: kubectl get all
+  kd: kubectl describe
+  kdp: kubectl describe pod
+  kdn: kubectl describe node
+  kaf: kubectl apply -f
+  kdf: kubectl delete -f
+  kl: kubectl logs
+  kex: kubectl exec -it

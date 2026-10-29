@@ -1,0 +1,106 @@
+---
+- name: Create owned installation and configuration directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - '{{ k8s_base_root }}'
+    - '{{ k8s_base_cache }}'
+    - /usr/local/bin
+    - /usr/local/sbin
+    - /etc/containerd
+    - /etc/systemd/system/kubelet.service.d
+
+- name: Record ownership before staging role-managed runtime files
+  ansible.builtin.copy:
+    dest: '{{ k8s_base_root }}/managed'
+    content: "Managed by the k8s_base role. Bootstrap only; upgrades need review.\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install each selected checksum-locked artifact
+  ansible.builtin.include_tasks: artifact.yml
+  loop: '{{ k8s_base_artifacts }}'
+  loop_control:
+    loop_var: k8s_base_artifact
+    label: '{{ k8s_base_artifact.name }}'
+  when: k8s_base_artifact.scope == 'all' or inventory_hostname in groups.get('control_plane', [])
+
+- name: Configure containerd CRIv1 with systemd cgroups
+  ansible.builtin.template:
+    src: containerd.toml.j2
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+    validate: /usr/local/bin/containerd --config %s config dump
+  notify: Restart the managed containerd service
+
+- name: Install the managed containerd service
+  ansible.builtin.template:
+    src: containerd.service.j2
+    dest: /etc/systemd/system/containerd.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart the managed containerd service
+
+- name: Configure crictl to use the containerd Unix socket
+  ansible.builtin.copy:
+    dest: /etc/crictl.yaml
+    content: |
+      runtime-endpoint: unix:///run/containerd/containerd.sock
+      image-endpoint: unix:///run/containerd/containerd.sock
+      timeout: 10
+      debug: false
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install the kubelet service and kubeadm drop-in
+  ansible.builtin.template:
+    src: '{{ item.src }}'
+    dest: '{{ item.dest }}'
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - {src: kubelet.service.j2, dest: /etc/systemd/system/kubelet.service}
+    - {src: kubelet-kubeadm.conf.j2, dest: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf}
+    - {src: kubelet-default.j2, dest: /etc/default/kubelet}
+
+- name: Activate changed containerd configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure containerd is enabled and running
+  ansible.builtin.systemd_service:
+    name: containerd
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Keep unconfigured kubelet stopped until the explicit bootstrap phase
+  ansible.builtin.systemd_service:
+    name: kubelet
+    daemon_reload: true
+    enabled: false
+    state: stopped
+
+- name: Require the containerd CRI endpoint to respond
+  ansible.builtin.command: /usr/local/bin/crictl info
+  register: k8s_base_cri_info
+  changed_when: false
+  retries: 5
+  delay: 2
+  until: k8s_base_cri_info.rc == 0
+
+- name: Require runtime readiness while allowing CNI to await bootstrap
+  ansible.builtin.assert:
+    that: >-
+      (k8s_base_cri_info.stdout | from_json).status.conditions |
+      selectattr('type', 'equalto', 'RuntimeReady') | selectattr('status', 'equalto', true) | list | length == 1

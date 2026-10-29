@@ -1,0 +1,30 @@
+---
+k8s_base_access_verified: "{{ baseline_access_verified | default(false) }}"
+k8s_base_node_interface: "{{ baseline_expected_interface | default('lab0') }}"
+k8s_base_node_ip: "{{ ansible_facts[k8s_base_node_interface].ipv4.address }}"
+k8s_base_pod_cidr: 10.244.0.0/16
+k8s_base_service_cidr: 10.96.0.0/12
+k8s_base_cni_transport: ipip
+k8s_base_root: /var/lib/k8s-base
+k8s_base_cache: /var/cache/k8s-base
+k8s_base_calico_dir: /opt/k8s-base/calico
+k8s_base_kubeconfig: /etc/kubernetes/admin.conf
+k8s_base_calico_apply: false
+k8s_base_required_packages:
+  - openssl
+  - ca-certificates
+  - curl
+  - conntrack
+  - socat
+  - iproute2
+  - iptables
+  - ethtool
+  - kmod
+  - tar
+  - gzip
+k8s_base_cluster_name: vanilla-lab
+k8s_base_dns_domain: cluster.local
+k8s_base_bootstrap_dir: /var/lib/k8s-base/bootstrap
+k8s_base_cri_socket: unix:///run/containerd/containerd.sock
+k8s_base_join_token_ttl: 10m
+k8s_base_rollout_timeout: 300s

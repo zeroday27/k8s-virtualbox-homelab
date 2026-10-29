@@ -1,0 +1,105 @@
+---
+- name: Require completed preflight facts on every lab node
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].k8s_base_policy is defined
+      - hostvars[item].k8s_base_membership is defined
+  loop: '{{ groups.lab_nodes }}'
+
+- name: Preview the control-plane configuration without creating membership
+  ansible.builtin.debug:
+    msg: "{{ lookup('ansible.builtin.template', 'kubeadm-init.yml.j2') }}"
+  when: ansible_check_mode
+
+- name: Initialize the role-owned control plane
+  when: not ansible_check_mode
+  block:
+    - name: Require control-plane context and consistent existing membership
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == groups.control_plane[0]
+          - not k8s_base_membership.results[0].stat.exists or k8s_base_membership.results[2].stat.exists
+          - ansible_facts.processor_vcpus | int >= 2
+          - ansible_facts.memtotal_mb | int >= 1700
+
+    - name: Create private bootstrap and image-patch directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop:
+        - '{{ k8s_base_bootstrap_dir }}'
+        - '{{ k8s_base_bootstrap_dir }}/patches'
+
+    - name: Render and validate the pinned kubeadm initialization configuration
+      ansible.builtin.template:
+        src: kubeadm-init.yml.j2
+        dest: '{{ k8s_base_bootstrap_dir }}/init.yaml'
+        owner: root
+        group: root
+        mode: '0600'
+        validate: /usr/local/bin/kubeadm config validate --config %s
+
+    - name: Pin control-plane static pod images with kubeadm patches
+      ansible.builtin.copy:
+        dest: '{{ k8s_base_bootstrap_dir }}/patches/{{ item }}+strategic.yaml'
+        content: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: {{ item }}
+          spec:
+            containers:
+              - name: {{ item }}
+                image: registry.k8s.io/{{ item }}@{{ k8s_base_bom.images['registry.k8s.io/' ~ item].digest }}
+        owner: root
+        group: root
+        mode: '0600'
+      loop: [kube-apiserver, kube-controller-manager, kube-scheduler]
+
+    - name: Enable kubelet for kubeadm to configure and start
+      ansible.builtin.systemd_service:
+        name: kubelet
+        enabled: true
+        daemon_reload: true
+
+    - name: Initialize only a node without existing membership
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubeadm, init, --config, '{{ k8s_base_bootstrap_dir }}/init.yaml']
+        creates: /etc/kubernetes/admin.conf
+      no_log: true
+      when: not k8s_base_membership.results[0].stat.exists
+
+    - name: Record the successful control-plane bootstrap
+      ansible.builtin.import_tasks: receipt.yml
+
+    - name: Read the kube-proxy image installed by kubeadm
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - -n
+          - kube-system
+          - get
+          - daemonset
+          - kube-proxy
+          - -o
+          - jsonpath={.spec.template.spec.containers[0].image}
+      register: k8s_base_proxy_image
+      changed_when: false
+
+    - name: Enforce the verified multi-architecture kube-proxy image digest
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - -n
+          - kube-system
+          - set
+          - image
+          - daemonset/kube-proxy
+          - kube-proxy=registry.k8s.io/kube-proxy@{{ k8s_base_bom.images['registry.k8s.io/kube-proxy'].digest }}
+      changed_when: true
+      when: k8s_base_proxy_image.stdout != ('registry.k8s.io/kube-proxy@' ~ k8s_base_bom.images['registry.k8s.io/kube-proxy'].digest)

@@ -1,0 +1,119 @@
+---
+- name: Validate the Calico network and image contract
+  ansible.builtin.import_tasks: policy.yml
+
+- name: Stage and render Calico using the pinned Kustomize binary
+  when: not ansible_check_mode
+  block:
+    - name: Create the owned Calico overlay directory
+      ansible.builtin.file:
+        path: '{{ k8s_base_calico_dir }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Vendor the verified Calico release manifest
+      ansible.builtin.get_url:
+        url: '{{ k8s_base_bom.calico_manifest.url }}'
+        dest: '{{ k8s_base_calico_dir }}/calico.yaml'
+        checksum: 'sha256:{{ k8s_base_bom.calico_manifest.sha256 }}'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Configure the Kubernetes node-IP and pod-network overlay
+      ansible.builtin.template:
+        src: calico-kustomization.yml.j2
+        dest: '{{ k8s_base_calico_dir }}/kustomization.yaml'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Build the local immutable-image Calico overlay
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kustomize, build, '{{ k8s_base_calico_dir }}']
+      register: k8s_base_calico_rendered
+      changed_when: false
+
+    - name: Save the reviewed rendered Calico manifest
+      ansible.builtin.copy:
+        dest: '{{ k8s_base_calico_dir }}/rendered.yaml'
+        content: "{{ k8s_base_calico_rendered.stdout }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+- name: Preview the Calico overlay in check mode
+  ansible.builtin.debug:
+    msg: "{{ lookup('ansible.builtin.template', 'calico-kustomization.yml.j2') }}"
+  when: ansible_check_mode
+
+- name: Require an initialized cluster before applying the CNI
+  when: k8s_base_calico_apply | bool and not ansible_check_mode
+  block:
+    - name: Inspect the explicit administrator kubeconfig
+      ansible.builtin.stat:
+        path: '{{ k8s_base_kubeconfig }}'
+      register: k8s_base_admin_conf
+
+    - name: Require the control-plane kubeconfig
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname in groups.get('control_plane', [])
+          - k8s_base_admin_conf.stat.isreg | default(false)
+        fail_msg: Initialize the cluster explicitly before using 03-k8s-calico.yml.
+
+    - name: Detect whether the rendered resources differ from the API
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ k8s_base_kubeconfig }}
+          - diff
+          - --server-side
+          - --field-manager=k8s-base
+          - -f
+          - '{{ k8s_base_calico_dir }}/rendered.yaml'
+      register: k8s_base_calico_diff
+      failed_when: k8s_base_calico_diff.rc not in [0, 1]
+      changed_when: false
+
+    - name: Apply the local rendered Calico resources with server-side ownership
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ k8s_base_kubeconfig }}
+          - apply
+          - --server-side
+          - --field-manager=k8s-base
+          - -f
+          - '{{ k8s_base_calico_dir }}/rendered.yaml'
+      register: k8s_base_calico_applied
+      changed_when: true
+      when: k8s_base_calico_diff.rc == 1
+
+    - name: Wait for Calico and CoreDNS rollouts
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ k8s_base_kubeconfig }}
+          - -n
+          - kube-system
+          - rollout
+          - status
+          - '{{ item }}'
+          - --timeout={{ k8s_base_rollout_timeout }}
+      loop: [daemonset/calico-node, deployment/calico-kube-controllers, deployment/coredns, daemonset/kube-proxy]
+      changed_when: false
+
+    - name: Require all inventoried nodes to report Ready
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ k8s_base_kubeconfig }}
+          - wait
+          - --for=condition=Ready
+          - node/{{ item }}
+          - --timeout={{ k8s_base_rollout_timeout }}
+      loop: '{{ groups.lab_nodes }}'
+      changed_when: false
