@@ -35,6 +35,7 @@ check-ansible:
 	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/02-k8s-bootstrap.yml
 	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/03-k8s-calico.yml
 	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/04-k8s-shell.yml
+	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/playbooks/05-k8s-components.yml
 
 # Planning root only; this target never selects a provisioning adapter.
 plan:

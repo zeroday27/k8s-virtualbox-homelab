@@ -1,0 +1,18 @@
+---
+- name: Validate the CSR signature, authenticated identity and exact inventory SANs
+  ansible.builtin.set_fact:
+    metrics_server_approved_csr: >-
+      {{ metrics_server_csr | metrics_server_serving_approval(inventory_hostname, metrics_server_node_ip) }}
+
+- name: Submit only the reviewed resource version to the approval subresource
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig={{ metrics_server_kubeconfig }}
+      - replace
+      - --raw=/apis/certificates.k8s.io/v1/certificatesigningrequests/{{ metrics_server_csr.metadata.name }}/approval
+      - -f
+      - '-'
+    stdin: '{{ metrics_server_approved_csr | to_json }}'
+  delegate_to: '{{ groups.control_plane[0] }}'
+  changed_when: true

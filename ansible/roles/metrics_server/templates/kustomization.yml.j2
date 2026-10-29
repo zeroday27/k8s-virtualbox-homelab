@@ -1,0 +1,60 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - components.yaml
+images:
+  - name: {{ metrics_server_bom.image.repository }}
+    digest: {{ metrics_server_bom.image.digest }}
+patches:
+  - target:
+      kind: Deployment
+      name: metrics-server
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: metrics-server
+        namespace: kube-system
+      spec:
+        replicas: {{ metrics_server_replicas }}
+        template:
+          metadata:
+            annotations:
+              lab.k8s.local/serving-certificate-sha256: "{{ metrics_server_certificate_sha256 }}"
+          spec:
+            securityContext:
+              fsGroup: 1000
+            containers:
+              - name: metrics-server
+                args:
+                  - --secure-port=10250
+                  - --kubelet-preferred-address-types=InternalIP
+                  - --kubelet-use-node-status-port
+                  - --metric-resolution=15s
+                  - --kubelet-certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                  - --tls-cert-file=/etc/metrics-server/tls/tls.crt
+                  - --tls-private-key-file=/etc/metrics-server/tls/tls.key
+                resources:
+                  requests:
+                    cpu: "{{ metrics_server_cpu_request }}"
+                    memory: "{{ metrics_server_memory_request }}"
+                volumeMounts:
+                  - name: serving-tls
+                    mountPath: /etc/metrics-server/tls
+                    readOnly: true
+            volumes:
+              - name: serving-tls
+                secret:
+                  secretName: metrics-server-serving
+                  defaultMode: 288
+  - target:
+      kind: APIService
+      name: v1beta1.metrics.k8s.io
+    patch: |-
+      apiVersion: apiregistration.k8s.io/v1
+      kind: APIService
+      metadata:
+        name: v1beta1.metrics.k8s.io
+      spec:
+        insecureSkipTLSVerify: false
+        caBundle: {{ metrics_server_ca_bundle | to_json }}

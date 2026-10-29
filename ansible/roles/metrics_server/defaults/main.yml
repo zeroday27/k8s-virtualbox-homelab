@@ -1,0 +1,14 @@
+---
+metrics_server_dir: /opt/k8s-components/metrics-server
+metrics_server_state_dir: /var/lib/k8s-components/metrics-server
+metrics_server_kubeconfig: /etc/kubernetes/admin.conf
+metrics_server_ca_cert: /etc/kubernetes/pki/ca.crt
+metrics_server_ca_key: /etc/kubernetes/pki/ca.key
+metrics_server_namespace: kube-system
+metrics_server_replicas: 1
+metrics_server_cpu_request: 100m
+metrics_server_memory_request: 200Mi
+metrics_server_timeout: 300s
+metrics_server_certificate_days: 90
+metrics_server_renew_before_days: 30
+metrics_server_node_ip: '{{ ansible_facts[baseline_expected_interface].ipv4.address }}'

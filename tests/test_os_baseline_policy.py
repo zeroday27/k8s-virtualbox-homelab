@@ -63,6 +63,17 @@ class NetworkPolicyTests(unittest.TestCase):
                 self.assertNotIn('echo-request', ipv6)
                 self.assertNotIn('echo-reply', ipv6)
 
+    def test_metrics_allows_pod_and_snat_node_sources_only_when_enabled(self):
+        for role in ['control_plane', 'worker']:
+            enabled = self.render(role=role, metrics=True)
+            disabled = self.render(role=role, metrics=False)
+            for rule in ['ip saddr @nodes tcp dport 10250 accept',
+                         'ip saddr { 10.244.0.0/16 } tcp dport 10250 accept']:
+                self.assertIn(rule, enabled)
+                self.assertNotIn(rule, disabled)
+            self.assertNotIn('ip saddr @bastions tcp dport 10250', enabled)
+            self.assertNotIn('0.0.0.0/0', enabled)
+
     def test_transport_rules_are_scoped_to_selected_mode(self):
         ipip, vxlan = self.render(), self.render(transport='vxlan')
         self.assertIn('ip protocol 4 accept', ipip)

@@ -97,7 +97,7 @@
     "gitops": "none",
     "gateway_api": false,
     "cert_manager": false,
-    "metrics_server": false,
+    "metrics_server": true,
     "monitoring": false,
     "logging": false,
     "policy_engine": "none",

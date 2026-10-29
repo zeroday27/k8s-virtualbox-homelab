@@ -1,0 +1,6 @@
+---
+- name: Restart kubelet for serving certificate bootstrap
+  ansible.builtin.systemd_service:
+    name: kubelet
+    state: restarted
+  when: not ansible_check_mode

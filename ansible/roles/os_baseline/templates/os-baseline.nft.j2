@@ -18,8 +18,11 @@ table inet os_baseline {
     ip saddr @bastions icmp type echo-request accept
     ip saddr @nodes icmp type echo-request accept
     ip saddr @controls tcp dport {{ baseline_firewall_policy.ports.kubelet_port }} accept
-{% if baseline_firewall_policy.metrics and baseline_firewall_policy.pods %}
+{% if baseline_firewall_policy.metrics %}
+    ip saddr @nodes tcp dport {{ baseline_firewall_policy.ports.kubelet_port }} accept
+{% if baseline_firewall_policy.pods %}
     ip saddr { {{ baseline_firewall_policy.pods | join(', ') }} } tcp dport {{ baseline_firewall_policy.ports.kubelet_port }} accept
+{% endif %}
 {% endif %}
 {% if baseline_firewall_policy.role == 'control_plane' %}
     ip saddr @nodes tcp dport {{ baseline_firewall_policy.ports.api_port }} accept

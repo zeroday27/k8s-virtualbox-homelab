@@ -140,4 +140,8 @@ This does not replace the existing Kubespray production scaffold or its release 
 Base preparation does not initialize a cluster.
 
 The [numbered Ansible playbooks](ansible/playbooks/README.md) document the lab’s
-00–04 execution order and map each phase to its reusable role.
+00–05 execution order and map each phase to its reusable role.
+
+Phase `05-k8s-components.yml` adds independently tagged component roles.
+[Metrics Server](ansible/roles/metrics_server/README.md) is the first selected
+add-on, with its own BOM, trusted TLS prerequisites and runtime verification.

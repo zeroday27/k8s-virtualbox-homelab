@@ -43,7 +43,7 @@ or flushes the global ruleset. This implementation supports an IPv4 cluster.
 | SSH TCP22 on every node | Individual bastion addresses only |
 | API TCP6443 on control planes | Nodes, bastions, configured pod CIDRs |
 | etcd TCP2379/2380 on control planes | Control planes only |
-| kubelet TCP10250 on every node | Control planes; pod CIDRs only when `baseline_metrics_to_kubelet: true` |
+| kubelet TCP10250 on every node | Control planes; pod CIDRs and exact node IPs for source-NATed scraping only when `baseline_metrics_to_kubelet: true` |
 | Calico IPIP protocol4 + BGP TCP179 | Nodes only, with `baseline_cni_transport: ipip` |
 | Calico VXLAN UDP4789 | Nodes only, with `baseline_cni_transport: vxlan` |
 | Calico unencapsulated BGP TCP179 | Nodes only, with `baseline_cni_transport: none` |

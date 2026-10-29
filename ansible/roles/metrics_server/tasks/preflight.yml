@@ -1,0 +1,146 @@
+---
+- name: Require reviewed access, complete inventory and fixed ownership paths
+  ansible.builtin.assert:
+    that:
+      - baseline_access_verified | default(false) is sameas true
+      - ansible_user != 'root'
+      - groups.get('control_plane', []) | length == 1
+      - groups.get('workers', []) | length == 2
+      - groups.get('lab_nodes', []) | length == 3
+      - ansible_limit is not defined or ansible_limit == ''
+      - metrics_server_dir == '/opt/k8s-components/metrics-server'
+      - metrics_server_state_dir == '/var/lib/k8s-components/metrics-server'
+      - metrics_server_kubeconfig == '/etc/kubernetes/admin.conf'
+      - metrics_server_ca_cert == '/etc/kubernetes/pki/ca.crt'
+      - metrics_server_ca_key == '/etc/kubernetes/pki/ca.key'
+      - metrics_server_namespace == 'kube-system'
+      - metrics_server_replicas | int == 1
+      - metrics_server_cpu_request is match('^[1-9][0-9]*m$')
+      - metrics_server_memory_request is match('^[1-9][0-9]*Mi$')
+      - metrics_server_timeout is match('^[1-9][0-9]*s$')
+      - metrics_server_certificate_days | int == 90
+      - metrics_server_renew_before_days | int == 30
+      - baseline_metrics_to_kubelet | bool
+    fail_msg: Use the complete lab inventory with verified access and coherent Metrics Server/firewall selection.
+
+- name: Validate the release manifest and multi-architecture image lock
+  ansible.builtin.assert:
+    that:
+      - metrics_server_bom.version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - >-
+        metrics_server_bom.manifest.url ==
+        ('https://github.com/kubernetes-sigs/metrics-server/releases/download/v' ~ metrics_server_bom.version ~ '/components.yaml')
+      - metrics_server_bom.manifest.sha256 is match('^[a-f0-9]{64}$')
+      - metrics_server_bom.image.repository == 'registry.k8s.io/metrics-server/metrics-server'
+      - metrics_server_bom.image.tag == ('v' ~ metrics_server_bom.version)
+      - metrics_server_bom.image.digest is match('^sha256:[a-f0-9]{64}$')
+      - metrics_server_bom.image.architectures.arm64 is match('^sha256:[a-f0-9]{64}$')
+      - metrics_server_bom.image.architectures.amd64 is match('^sha256:[a-f0-9]{64}$')
+
+- name: Read Kubernetes version without modifying the API
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, '--kubeconfig={{ metrics_server_kubeconfig }}', version, -o, json]
+  register: metrics_server_version
+  check_mode: false
+  changed_when: false
+
+- name: Require the supported Kubernetes minor range
+  ansible.builtin.assert:
+    that:
+      - (metrics_server_version.stdout | from_json).serverVersion.major == '1'
+      - (metrics_server_version.stdout | from_json).serverVersion.minor | int >= metrics_server_bom.kubernetes_min_minor
+
+- name: Read all current node identities and readiness
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, '--kubeconfig={{ metrics_server_kubeconfig }}', get, nodes, -o, json]
+  register: metrics_server_nodes
+  check_mode: false
+  changed_when: false
+
+- name: Require the exact inventory nodes to be Ready
+  ansible.builtin.assert:
+    that:
+      - (metrics_server_nodes.stdout | from_json)['items'] | map(attribute='metadata.name') | sort == groups.lab_nodes | sort
+      - >-
+        (metrics_server_nodes.stdout | from_json)['items'] | map(attribute='status.conditions') |
+        flatten | selectattr('type', 'equalto', 'Ready') | rejectattr('status', 'equalto', 'True') | list | length == 0
+
+- name: Read the central kubeadm kubelet configuration
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, '--kubeconfig={{ metrics_server_kubeconfig }}', -n, kube-system, get, configmap, kubelet-config, -o, json]
+  register: metrics_server_kubelet_cm
+  check_mode: false
+  changed_when: false
+
+- name: Require kubeadm ownership of the shared kubelet configuration
+  ansible.builtin.assert:
+    that:
+      - ((metrics_server_kubelet_cm.stdout | from_json).data.kubelet | from_yaml).kind == 'KubeletConfiguration'
+
+- name: Inspect the local cluster signing and ownership files without reading keys
+  ansible.builtin.stat:
+    path: '{{ item }}'
+  loop:
+    - '{{ metrics_server_ca_cert }}'
+    - '{{ metrics_server_ca_key }}'
+    - '{{ metrics_server_state_dir }}/managed'
+  register: metrics_server_ownership
+
+- name: Require the kubeadm cluster signer
+  ansible.builtin.assert:
+    that:
+      - metrics_server_ownership.results[0].stat.isreg | default(false)
+      - metrics_server_ownership.results[1].stat.isreg | default(false)
+    fail_msg: External-CA clusters need a separate serving-certificate workflow.
+
+- name: Inspect any existing Metrics Server deployment
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig={{ metrics_server_kubeconfig }}
+      - -n
+      - kube-system
+      - get
+      - deployment
+      - metrics-server
+      - --ignore-not-found
+      - -o
+      - json
+  register: metrics_server_existing
+  check_mode: false
+  changed_when: false
+
+- name: Refuse automatic adoption of a foreign Metrics Server deployment
+  ansible.builtin.assert:
+    that:
+      - metrics_server_existing.stdout | trim | length == 0 or metrics_server_ownership.results[2].stat.exists
+
+- name: Inspect reserved Metrics Server resources before adoption
+  ansible.builtin.command:
+    argv: '{{ item }}'
+  loop:
+    - - /usr/local/bin/kubectl
+      - --kubeconfig={{ metrics_server_kubeconfig }}
+      - -n
+      - kube-system
+      - get
+      - secret
+      - metrics-server-serving
+      - --ignore-not-found
+      - -o
+      - name
+    - [/usr/local/bin/kubectl, '--kubeconfig={{ metrics_server_kubeconfig }}', get, apiservice, v1beta1.metrics.k8s.io, --ignore-not-found, -o, name]
+  register: metrics_server_reserved
+  check_mode: false
+  changed_when: false
+
+- name: Refuse reserved resources without the role ownership marker
+  ansible.builtin.assert:
+    that: item.stdout | trim | length == 0 or metrics_server_ownership.results[2].stat.exists
+  loop: '{{ metrics_server_reserved.results }}'
+  loop_control:
+    label: '{{ item.stdout | default("absent") }}'
+
+- name: Record a completed component preflight for the following phases
+  ansible.builtin.set_fact:
+    metrics_server_preflight_ok: true

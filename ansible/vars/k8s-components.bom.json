@@ -1,0 +1,22 @@
+{
+  "metrics_server_bom": {
+    "version": "0.9.0",
+    "kubernetes_min_minor": 34,
+    "manifest": {
+      "url": "https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml",
+      "sha256": "1cec29a5267809306a2c6ec74a3e449abbb705b4a8beed0c8a1963910f72c79b"
+    },
+    "image": {
+      "repository": "registry.k8s.io/metrics-server/metrics-server",
+      "tag": "v0.9.0",
+      "digest": "sha256:d9862115e7c7881280d3d75ca26bda8ffc0fc213315979575bf23ce9826205c0",
+      "architectures": {
+        "arm64": "sha256:d0341e07a1cf2b751e684cba68e2a0c62d3c5d2d23501fd67dc384d517ec65de",
+        "amd64": "sha256:25d291fde59974547bac6f07fa9d6cf6f5bedd1f19d60c893311c5e741e0a42f"
+      }
+    },
+    "verified_date": "2026-10-29",
+    "source": "https://github.com/kubernetes-sigs/metrics-server/releases/tag/v0.9.0",
+    "qualification": "candidate; runtime validation pending"
+  }
+}

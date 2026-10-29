@@ -1,0 +1,51 @@
+---
+- name: Validate the selected cluster add-ons
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/k8s-components.bom.json
+  tasks:
+    - name: Validate Metrics Server prerequisites
+      ansible.builtin.include_role:
+        name: metrics_server
+        tasks_from: preflight.yml
+        apply:
+          tags: [metrics_server]
+      when: k8s_components_metrics_server_enabled | default(false) | bool
+      tags: [metrics_server]
+
+- name: Prepare add-on prerequisites on each node
+  hosts: lab_nodes
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/k8s-components.bom.json
+  tasks:
+    - name: Prepare Metrics Server kubelet TLS and scoped firewall rules
+      ansible.builtin.include_role:
+        name: metrics_server
+        tasks_from: node.yml
+        apply:
+          tags: [metrics_server]
+      when: k8s_components_metrics_server_enabled | default(false) | bool
+      tags: [metrics_server]
+
+- name: Install and verify selected add-ons
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/k8s-components.bom.json
+  tasks:
+    - name: Install Metrics Server independently of bootstrap and CNI
+      ansible.builtin.include_role:
+        name: metrics_server
+        apply:
+          tags: [metrics_server]
+      when: k8s_components_metrics_server_enabled | default(false) | bool
+      tags: [metrics_server]

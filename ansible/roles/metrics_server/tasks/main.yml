@@ -1,0 +1,255 @@
+---
+- name: Require the node prerequisite phase on every inventory host
+  ansible.builtin.assert:
+    that: hostvars[item].metrics_server_node_prepared | default(false)
+  loop: '{{ groups.lab_nodes }}'
+
+- name: Read the public cluster CA certificate for API aggregation trust
+  ansible.builtin.slurp:
+    src: '{{ metrics_server_ca_cert }}'
+  register: metrics_server_public_ca
+
+- name: Define public rendering inputs
+  ansible.builtin.set_fact:
+    metrics_server_ca_bundle: '{{ metrics_server_public_ca.content }}'
+    metrics_server_certificate_sha256: check-mode-renewal-preview
+    metrics_server_cluster_domain: >-
+      {{ ((hostvars[groups.control_plane[0]].metrics_server_kubelet_cm.stdout | from_json).data.kubelet | from_yaml).clusterDomain }}
+
+- name: Require a valid cluster DNS suffix
+  ansible.builtin.assert:
+    that: metrics_server_cluster_domain is match('^[a-z0-9]+([.-][a-z0-9]+)*$')
+
+- name: Preview the immutable-image overlay without issuing certificates or applying resources
+  ansible.builtin.debug:
+    msg: "{{ lookup('ansible.builtin.template', 'kustomization.yml.j2') }}"
+  when: ansible_check_mode
+
+- name: Install the selected Metrics Server release
+  when: not ansible_check_mode
+  block:
+    - name: Create owned component staging and private state directories
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '{{ item.mode }}'
+      loop:
+        - {path: '{{ metrics_server_dir }}', mode: '0755'}
+        - {path: '{{ metrics_server_state_dir }}', mode: '0700'}
+
+    - name: Record component ownership before its first install
+      ansible.builtin.copy:
+        dest: '{{ metrics_server_state_dir }}/managed'
+        content: "Managed by the metrics_server role.
+"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Keep future kubeadm upgrades on the same kubelet serving TLS setting
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ metrics_server_kubeconfig }}
+          - -n
+          - kube-system
+          - patch
+          - configmap
+          - kubelet-config
+          - --type=merge
+          - -p
+          - >-
+            {{ {'data': {'kubelet': ((metrics_server_kubelet_cm.stdout | from_json).data.kubelet | from_yaml |
+                 combine({'serverTLSBootstrap': true}) | to_nice_yaml(indent=2))}} | to_json }}
+      changed_when: true
+      when: not (((metrics_server_kubelet_cm.stdout | from_json).data.kubelet | from_yaml).serverTLSBootstrap | default(false))
+
+    - name: Install the local serving-certificate renewal helper
+      ansible.builtin.copy:
+        src: serving_certificate.py
+        dest: '{{ metrics_server_state_dir }}/serving_certificate.py'
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Issue or renew the local Metrics Server serving certificate
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - '{{ metrics_server_state_dir }}/serving_certificate.py'
+          - --directory
+          - '{{ metrics_server_state_dir }}/tls'
+          - --ca-cert
+          - '{{ metrics_server_ca_cert }}'
+          - --ca-key
+          - '{{ metrics_server_ca_key }}'
+          - --dns-name
+          - metrics-server.kube-system.svc
+          - --dns-name
+          - metrics-server.kube-system.svc.{{ metrics_server_cluster_domain }}
+          - --days
+          - '{{ metrics_server_certificate_days | string }}'
+          - --renew-days
+          - '{{ metrics_server_renew_before_days | string }}'
+      register: metrics_server_certificate
+      changed_when: (metrics_server_certificate.stdout | from_json).changed
+
+    - name: Record the public certificate fingerprint for rollout tracking
+      ansible.builtin.set_fact:
+        metrics_server_certificate_sha256: '{{ (metrics_server_certificate.stdout | from_json).certificate_sha256 }}'
+
+    - name: Read the current managed serving secret without exposing its contents
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ metrics_server_kubeconfig }}
+          - -n
+          - kube-system
+          - get
+          - secret
+          - metrics-server-serving
+          - --ignore-not-found
+          - -o
+          - name
+      register: metrics_server_secret_exists
+      changed_when: false
+
+    - name: Publish only a newly issued or missing serving certificate secret
+      when: (metrics_server_certificate.stdout | from_json).changed or metrics_server_secret_exists.stdout | trim | length == 0
+      block:
+        - name: Build the local TLS secret without logging private key data
+          ansible.builtin.command:
+            argv:
+              - /usr/local/bin/kubectl
+              - --kubeconfig={{ metrics_server_kubeconfig }}
+              - -n
+              - kube-system
+              - create
+              - secret
+              - tls
+              - metrics-server-serving
+              - --cert={{ metrics_server_state_dir }}/tls/tls.crt
+              - --key={{ metrics_server_state_dir }}/tls/tls.key
+              - --dry-run=client
+              - -o
+              - json
+          register: metrics_server_secret
+          changed_when: false
+          no_log: true
+
+        - name: Apply the managed TLS secret through stdin without last-applied annotations
+          ansible.builtin.command:
+            argv:
+              - /usr/local/bin/kubectl
+              - --kubeconfig={{ metrics_server_kubeconfig }}
+              - apply
+              - --server-side
+              - --field-manager=k8s-components
+              - -f
+              - '-'
+            stdin: '{{ metrics_server_secret.stdout }}'
+          changed_when: true
+          no_log: true
+
+    - name: Vendor the release manifest using its SHA256 lock
+      ansible.builtin.get_url:
+        url: '{{ metrics_server_bom.manifest.url }}'
+        dest: '{{ metrics_server_dir }}/components.yaml'
+        checksum: 'sha256:{{ metrics_server_bom.manifest.sha256 }}'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Render the Metrics Server Kustomize overlay
+      ansible.builtin.template:
+        src: kustomization.yml.j2
+        dest: '{{ metrics_server_dir }}/kustomization.yaml'
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Build the reviewed overlay locally on the control plane
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kustomize, build, '{{ metrics_server_dir }}']
+      register: metrics_server_rendered
+      changed_when: false
+
+    - name: Save the rendered public resources without private keys
+      ansible.builtin.copy:
+        dest: '{{ metrics_server_dir }}/rendered.yaml'
+        content: "{{ metrics_server_rendered.stdout }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Detect changes against the existing API resources
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ metrics_server_kubeconfig }}
+          - diff
+          - --server-side
+          - --field-manager=k8s-components
+          - -f
+          - '{{ metrics_server_dir }}/rendered.yaml'
+      register: metrics_server_diff
+      changed_when: false
+      failed_when: metrics_server_diff.rc not in [0, 1]
+
+    - name: Apply only changed Metrics Server resources
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ metrics_server_kubeconfig }}
+          - apply
+          - --server-side
+          - --field-manager=k8s-components
+          - -f
+          - '{{ metrics_server_dir }}/rendered.yaml'
+      changed_when: true
+      when: metrics_server_diff.rc == 1
+
+    - name: Wait for the Metrics Server rollout
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ metrics_server_kubeconfig }}
+          - -n
+          - kube-system
+          - rollout
+          - status
+          - deployment/metrics-server
+          - --timeout={{ metrics_server_timeout }}
+      changed_when: false
+
+    - name: Wait for trusted aggregated API availability
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ metrics_server_kubeconfig }}
+          - wait
+          - --for=condition=Available
+          - apiservice/v1beta1.metrics.k8s.io
+          - --timeout={{ metrics_server_timeout }}
+      changed_when: false
+
+    - name: Require CPU and memory samples for every node
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, '--kubeconfig={{ metrics_server_kubeconfig }}', get, --raw, /apis/metrics.k8s.io/v1beta1/nodes]
+      register: metrics_server_node_metrics
+      changed_when: false
+      retries: 20
+      delay: 5
+      until: (metrics_server_node_metrics.stdout | from_json)['items'] | map(attribute='metadata.name') | sort == groups.lab_nodes | sort
+
+    - name: Show node resource metrics for the deployment record
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, '--kubeconfig={{ metrics_server_kubeconfig }}', top, nodes]
+      changed_when: false
+
+    - name: Require pod metrics to be available
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, '--kubeconfig={{ metrics_server_kubeconfig }}', top, pods, -A]
+      changed_when: false

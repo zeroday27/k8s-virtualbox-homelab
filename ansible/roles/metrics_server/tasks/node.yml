@@ -1,0 +1,141 @@
+---
+- name: Require preflight and the supported node architecture
+  ansible.builtin.assert:
+    that:
+      - hostvars[groups.control_plane[0]].metrics_server_preflight_ok | default(false)
+      - ansible_facts.architecture in ['aarch64', 'x86_64']
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '26.04'
+      - baseline_expected_interface in ansible_facts.interfaces
+      - metrics_server_node_ip in baseline_node_addresses
+      - baseline_metrics_to_kubelet | bool
+
+- name: Match this guest's observed address to the Kubernetes node identity
+  ansible.builtin.set_fact:
+    metrics_server_this_node: >-
+      {{ (hostvars[groups.control_plane[0]].metrics_server_nodes.stdout | from_json)['items'] |
+         selectattr('metadata.name', 'equalto', inventory_hostname) | first }}
+
+- name: Require the node InternalIP to match the trusted management interface
+  ansible.builtin.assert:
+    that:
+      - >-
+        metrics_server_this_node.status.addresses | selectattr('type', 'equalto', 'InternalIP') |
+        map(attribute='address') | list == [metrics_server_node_ip]
+      - >-
+        metrics_server_this_node.status.nodeInfo.architecture ==
+        ('arm64' if ansible_facts.architecture == 'aarch64' else 'amd64')
+
+- name: Read the existing kubelet configuration without exposing private keys
+  ansible.builtin.slurp:
+    src: /var/lib/kubelet/config.yaml
+  register: metrics_server_kubelet_file
+
+- name: Require authenticated kubelet metrics endpoints before enabling serving TLS
+  ansible.builtin.assert:
+    that:
+      - (metrics_server_kubelet_file.content | b64decode | from_yaml).kind == 'KubeletConfiguration'
+      - (metrics_server_kubelet_file.content | b64decode | from_yaml).authentication.webhook.enabled
+      - not (metrics_server_kubelet_file.content | b64decode | from_yaml).authentication.anonymous.enabled
+      - (metrics_server_kubelet_file.content | b64decode | from_yaml).authorization.mode == 'Webhook'
+      - (metrics_server_kubelet_file.content | b64decode | from_yaml).tlsCertFile | default('') == ''
+      - (metrics_server_kubelet_file.content | b64decode | from_yaml).tlsPrivateKeyFile | default('') == ''
+
+- name: Preview the serving-certificate and firewall prerequisite changes
+  ansible.builtin.debug:
+    msg:
+      node: '{{ inventory_hostname }}'
+      management_ip: '{{ metrics_server_node_ip }}'
+      serving_certificate: Inventory-bound serving CSR validation and cluster-CA verification; no insecure TLS bypass.
+      firewall: Pod CIDRs may reach authenticated kubelet TCP10250; SSH sources and CNI tables remain under baseline ownership.
+  when: ansible_check_mode
+
+- name: Configure kubelet serving-certificate bootstrap without changing other settings
+  ansible.builtin.copy:
+    dest: /var/lib/kubelet/config.yaml
+    content: >-
+      {{ (metrics_server_kubelet_file.content | b64decode | from_yaml) |
+         combine({'serverTLSBootstrap': true}) | to_nice_yaml(indent=2) }}
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+  notify: Restart kubelet for serving certificate bootstrap
+
+- name: Activate the serving-certificate setting on this node before continuing
+  ansible.builtin.meta: flush_handlers
+
+- name: Obtain and verify the node serving certificate
+  when: not ansible_check_mode
+  block:
+    - name: Read this node's serving certificate requests through the trusted API
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig={{ metrics_server_kubeconfig }}
+          - get
+          - csr
+          - --field-selector=spec.signerName=kubernetes.io/kubelet-serving
+          - -o
+          - json
+      delegate_to: '{{ groups.control_plane[0] }}'
+      register: metrics_server_csrs
+      changed_when: false
+      retries: 20
+      delay: 3
+      until: >-
+        (metrics_server_csrs.stdout | from_json)['items'] |
+        selectattr('spec.username', 'equalto', 'system:node:' ~ inventory_hostname) | list | length > 0
+
+    - name: Validate and approve only pending requests for this exact inventory node
+      ansible.builtin.include_tasks: approve.yml
+      loop: >-
+        {{ (metrics_server_csrs.stdout | from_json)['items'] |
+           selectattr('spec.username', 'equalto', 'system:node:' ~ inventory_hostname) | list }}
+      loop_control:
+        loop_var: metrics_server_csr
+        label: '{{ metrics_server_csr.metadata.name }}'
+      when:
+        - metrics_server_csr.status.conditions | default([]) | length == 0
+        - metrics_server_csr.status.certificate | default('') | length == 0
+
+    - name: Require a trusted serving certificate on the kubelet socket
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/timeout
+          - '15'
+          - /usr/bin/openssl
+          - s_client
+          - -connect
+          - '{{ metrics_server_node_ip }}:10250'
+          - -CAfile
+          - '{{ metrics_server_ca_cert }}'
+          - -verify_ip
+          - '{{ metrics_server_node_ip }}'
+          - -verify_return_error
+          - -brief
+        stdin: ''
+      delegate_to: '{{ groups.control_plane[0] }}'
+      register: metrics_server_kubelet_tls
+      changed_when: false
+      retries: 20
+      delay: 3
+      until: metrics_server_kubelet_tls.rc == 0
+
+- name: Observe packages required by the baseline firewall checks
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Reuse the existing baseline access and service checks
+  ansible.builtin.include_role:
+    name: os_baseline
+    tasks_from: validate.yml
+
+- name: Reconcile only the owned baseline firewall with its rollback protection
+  ansible.builtin.include_role:
+    name: os_baseline
+    tasks_from: firewall.yml
+
+- name: Record the completed node prerequisite phase
+  ansible.builtin.set_fact:
+    metrics_server_node_prepared: true
