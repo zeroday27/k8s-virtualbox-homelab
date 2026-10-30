@@ -1,0 +1,20 @@
+[Unit]
+Description=Renew the managed Metrics Server serving certificate
+Wants=network-online.target
+After=network-online.target kubelet.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+Environment=LC_ALL=C
+ExecStart=/usr/bin/python3 {{ metrics_server_state_dir }}/renew_metrics_server.py --config {{ metrics_server_state_dir }}/renewal.json
+TimeoutStartSec=12min
+Restart=on-failure
+RestartSec=15min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={{ metrics_server_state_dir }}

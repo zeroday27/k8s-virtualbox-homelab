@@ -6,6 +6,8 @@ import ipaddress
 import json
 from pathlib import Path
 import subprocess
+import sys
+from unittest.mock import patch
 import tempfile
 import unittest
 
@@ -30,6 +32,8 @@ def load(name, path):
 
 POLICY = load('serving_csr', ROLE / 'filter_plugins/serving_csr.py')
 CERTIFICATE = load('serving_certificate', ROLE / 'files/serving_certificate.py')
+with patch.dict(sys.modules, {'serving_certificate': CERTIFICATE}):
+    RENEWAL = load('renew_metrics_server', ROLE / 'files/renew_metrics_server.py')
 
 
 class ServingApprovalTests(unittest.TestCase):
@@ -121,23 +125,39 @@ class MetricsCertificateTests(unittest.TestCase):
             root = Path(temporary)
             ca, key = root / 'ca.crt', root / 'ca.key'
             subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(key),
-                            '-out', str(ca), '-days', '365', '-subj', '/CN=TestCA',
+                            '-out', str(ca), '-days', '730', '-subj', '/CN=TestCA',
                             '-addext', 'basicConstraints=critical,CA:TRUE'], check=True, capture_output=True)
             names = ['metrics-server.kube-system.svc', 'metrics-server.kube-system.svc.cluster.local']
-            first = CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names)
+            first = CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names, days=90)
             self.assertTrue(first['changed'])
             self.assertEqual((root / 'tls/tls.key').stat().st_mode & 0o777, 0o600)
             self.assertEqual((root / 'tls').stat().st_mode & 0o777, 0o700)
-            self.assertFalse(CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names)['changed'])
-            renewed = CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names, renew_days=100)
+            self.assertFalse(CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names, days=90)['changed'])
+            renewed = CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names, days=365)
             self.assertTrue(renewed['changed'])
             self.assertNotEqual(first['certificate_sha256'], renewed['certificate_sha256'])
+            self.assertFalse(CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names, days=365)['changed'])
+            real_run = CERTIFICATE.run
+            def due_check(args, check=True):
+                if '-checkend' in args and str(root / 'tls/tls.crt') in args:
+                    return subprocess.CompletedProcess(args, 1, b'', b'')
+                return real_run(args, check)
+            with patch.object(CERTIFICATE, 'run', side_effect=due_check):
+                self.assertTrue(CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names, days=365)['changed'])
             self.assertEqual(sorted(p.name for p in (root / 'tls').iterdir()), ['tls.crt', 'tls.key'])
             subprocess.run(['openssl', 'verify', '-CAfile', str(ca), '-purpose', 'sslserver',
                             str(root / 'tls/tls.crt')], check=True, capture_output=True)
             certificate = x509.load_pem_x509_certificate((root / 'tls/tls.crt').read_bytes())
             self.assertEqual(certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName), names)
             self.assertFalse(certificate.extensions.get_extension_for_class(x509.BasicConstraints).value.ca)
+            self.assertEqual((certificate.not_valid_after_utc - certificate.not_valid_before_utc).days, 365)
+            with self.assertRaises(ValueError):
+                CERTIFICATE.reconcile(root / 'tls', str(ca), str(key), names, days=30, renew_days=30)
+            short_ca = root / 'short-ca.crt'
+            subprocess.run(['openssl', 'req', '-x509', '-new', '-key', str(key), '-out', str(short_ca),
+                            '-days', '100', '-subj', '/CN=ShortCA'], check=True, capture_output=True)
+            with self.assertRaises(ValueError):
+                CERTIFICATE.reconcile(root / 'other-tls', str(short_ca), str(key), names, days=365)
 
     def test_manifest_overlay_requires_tls_verification_and_digest_images(self):
         bom = json.loads((ROOT / 'ansible/vars/k8s-components.bom.json').read_text())['metrics_server_bom']
@@ -168,3 +188,81 @@ class MetricsCertificateTests(unittest.TestCase):
         self.assertIn('tasks_from: firewall.yml', node)
         self.assertNotIn('tasks_from: main.yml', node)
         self.assertIn('when: not ansible_check_mode', node)
+
+
+class RenewalAutomationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.state = Path(self.temporary.name)
+        (self.state / 'managed').write_text('managed')
+        (self.state / 'tls').mkdir()
+        (self.state / 'tls/tls.crt').write_bytes(b'public certificate')
+        (self.state / 'tls/tls.key').write_bytes(b'private key')
+        self.config = dict(state_dir=str(self.state), kubeconfig='/private/admin.conf', ca_cert='/private/ca.crt',
+                           ca_key='/private/ca.key', dns_names=['metrics-server.kube-system.svc'], days=365, renew_days=30)
+        self.expected = {key: base64.b64encode((self.state / 'tls' / key).read_bytes()).decode() for key in ['tls.crt', 'tls.key']}
+        self.secret = {'data': self.expected, 'type': 'kubernetes.io/tls'}
+        self.fingerprint = 'a' * 64
+        self.deployment = {'spec': {'template': {'metadata': {'annotations': {RENEWAL.ANNOTATION: self.fingerprint}}}}}
+        self.calls = []
+        self.failure = None
+
+    def client(self, config, args, stdin=None):
+        self.calls.append((args, stdin))
+        if 'secret' in args and 'get' in args:
+            return json.dumps(self.secret)
+        if 'get' in args and 'deployment' in args:
+            return json.dumps(self.deployment)
+        if 'apply' in args:
+            if self.failure:
+                raise RuntimeError('API unavailable')
+            self.secret = json.loads(stdin)
+        if 'patch' in args:
+            self.deployment = json.loads(args[-1])
+        return ''
+
+    def run_renewal(self, changed=False, prepare=False):
+        with patch.object(RENEWAL, 'reconcile', return_value={'changed': changed, 'certificate_sha256': self.fingerprint}):
+            return RENEWAL.reconcile_component(self.config, prepare, self.client)
+
+    def test_healthy_repeat_does_not_update_secret_or_restart_deployment(self):
+        self.assertFalse(self.run_renewal()['changed'])
+        self.assertFalse(any('apply' in args or 'patch' in args for args, _ in self.calls))
+        self.assertTrue(any('rollout' in args for args, _ in self.calls))
+
+    def test_retry_repairs_secret_and_rollout_after_a_partial_failure(self):
+        self.secret = {}
+        self.deployment['spec']['template']['metadata']['annotations'] = {}
+        self.failure = True
+        with self.assertRaises(RuntimeError):
+            self.run_renewal(changed=True)
+        self.failure = None
+        result = self.run_renewal(changed=False)
+        self.assertTrue(result['secret_changed'])
+        self.assertTrue(result['deployment_changed'])
+        self.assertEqual(self.secret['data'], self.expected)
+        self.assertNotIn('private key', json.dumps(result))
+        self.assertFalse(self.run_renewal()['changed'])
+
+    def test_initial_prepare_needs_no_existing_deployment(self):
+        self.secret = {}
+        self.assertTrue(self.run_renewal(prepare=True)['secret_changed'])
+        self.assertFalse(any('deployment' in args for args, _ in self.calls))
+
+    def test_ownership_marker_is_mandatory(self):
+        (self.state / 'managed').unlink()
+        with self.assertRaises(ValueError):
+            self.run_renewal()
+        self.assertFalse(self.calls)
+
+    def test_timer_is_persistent_and_service_keeps_private_state_restricted(self):
+        env = Environment(loader=FileSystemLoader(ROLE / 'templates'))
+        service = env.get_template('metrics-server-renew.service.j2').render(metrics_server_state_dir='/var/lib/k8s-components/metrics-server')
+        timer = env.get_template('metrics-server-renew.timer.j2').render()
+        self.assertIn('Persistent=true', timer)
+        self.assertIn('03:00:00 Asia/Bangkok', timer)
+        self.assertIn('ProtectSystem=strict', service)
+        self.assertIn('Restart=on-failure', service)
+        self.assertIn('UMask=0077', service)
+        self.assertNotIn('/etc/kubernetes/pki/ca.key', service)

@@ -9,6 +9,6 @@ metrics_server_replicas: 1
 metrics_server_cpu_request: 100m
 metrics_server_memory_request: 200Mi
 metrics_server_timeout: 300s
-metrics_server_certificate_days: 90
+metrics_server_certificate_days: 365
 metrics_server_renew_before_days: 30
 metrics_server_node_ip: '{{ ansible_facts[baseline_expected_interface].ipv4.address }}'

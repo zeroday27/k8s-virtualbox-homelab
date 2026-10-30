@@ -68,6 +68,27 @@
 - name: Obtain and verify the node serving certificate
   when: not ansible_check_mode
   block:
+    - name: Inspect the current serving certificate before requiring any historical CSR
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/timeout
+          - '15'
+          - /usr/bin/openssl
+          - s_client
+          - -connect
+          - '{{ metrics_server_node_ip }}:10250'
+          - -CAfile
+          - '{{ metrics_server_ca_cert }}'
+          - -verify_ip
+          - '{{ metrics_server_node_ip }}'
+          - -verify_return_error
+          - -brief
+        stdin: ''
+      delegate_to: '{{ groups.control_plane[0] }}'
+      register: metrics_server_existing_tls
+      changed_when: false
+      failed_when: false
+
     - name: Read this node's serving certificate requests through the trusted API
       ansible.builtin.command:
         argv:
@@ -84,6 +105,7 @@
       retries: 20
       delay: 3
       until: >-
+        metrics_server_existing_tls.rc == 0 or
         (metrics_server_csrs.stdout | from_json)['items'] |
         selectattr('spec.username', 'equalto', 'system:node:' ~ inventory_hostname) | list | length > 0
 

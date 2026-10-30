@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Issue/renew one role-owned serving certificate locally without exporting CA keys."""
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -15,14 +16,24 @@ def run(args, check=True):
     return subprocess.run(['openssl'] + args, check=check, capture_output=True)
 
 
-def reconcile(directory, ca_cert, ca_key, dns_names, days=90, renew_days=30):
+def reconcile(directory, ca_cert, ca_key, dns_names, days=365, renew_days=30):
     if not dns_names or any(not re.fullmatch(r'[a-z0-9]+(?:[.-][a-z0-9]+)*', name) for name in dns_names):
         raise ValueError('Explicit service DNS names are required')
+    if not 1 <= renew_days < days <= 365:
+        raise ValueError('Require 1 <= renewal window < certificate lifetime <= 365 days')
     directory = Path(directory)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(directory, 0o700)
     cert, key = directory / 'tls.crt', directory / 'tls.key'
     valid = cert.is_file() and key.is_file()
+    if valid:
+        dates = run(['x509', '-in', str(cert), '-noout', '-startdate', '-enddate'], False)
+        try:
+            start, end = [datetime.strptime(line.split('=', 1)[1].strip(), '%b %d %H:%M:%S %Y %Z')
+                          for line in dates.stdout.decode().splitlines()]
+            valid = dates.returncode == 0 and abs((end - start).total_seconds() - days * 86400) < 60
+        except ValueError:
+            valid = False
     if valid:
         valid = run(['x509', '-in', str(cert), '-checkend', str(renew_days * 86400), '-noout'], False).returncode == 0
         valid = valid and run(['verify', '-CAfile', ca_cert, '-purpose', 'sslserver', str(cert)], False).returncode == 0
@@ -35,6 +46,8 @@ def reconcile(directory, ca_cert, ca_key, dns_names, days=90, renew_days=30):
             public_key = run(['pkey', '-in', str(key), '-pubout']).stdout
             valid = public_cert == public_key
     if not valid:
+        if run(['x509', '-in', ca_cert, '-checkend', str(days * 86400), '-noout'], False).returncode:
+            raise ValueError('Cluster CA must remain valid beyond the requested leaf lifetime')
         with tempfile.TemporaryDirectory(prefix='issue-', dir=directory) as temporary:
             stage = Path(temporary)
             old_umask = os.umask(0o077)
@@ -63,7 +76,7 @@ if __name__ == '__main__':
     parser.add_argument('--ca-cert', required=True)
     parser.add_argument('--ca-key', required=True)
     parser.add_argument('--dns-name', action='append', required=True)
-    parser.add_argument('--days', type=int, default=90)
+    parser.add_argument('--days', type=int, default=365)
     parser.add_argument('--renew-days', type=int, default=30)
     args = parser.parse_args()
     print(json.dumps(reconcile(args.directory, args.ca_cert, args.ca_key, args.dns_name, args.days, args.renew_days)))

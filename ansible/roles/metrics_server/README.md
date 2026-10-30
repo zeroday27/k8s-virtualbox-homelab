@@ -45,11 +45,12 @@ webhook authentication/authorization remains required. Existing control-plane
 sources remain allowed. Forward/output/NAT rules remain owned by Calico and
 kube-proxy. No bastion SSH sources or public port access are added.
 
-The control plane generates a separate 90-day Metrics Server serving certificate
+The control plane generates a separate 365-day Metrics Server serving certificate
 with service DNS SANs, signed locally using the existing cluster CA. Its key
 stays root-only in private state and a Kubernetes TLS Secret. CA keys are never
 copied to the controller, workers, public manifests or Git. Secret operations
-use stdin, no_log and server-side apply without last-applied annotations.
+use stdin and server-side apply without last-applied annotations. The helper
+emits only change flags and the public certificate fingerprint.
 External-CA clusters require a separately reviewed signer workflow.
 
 Metrics Server verifies kubelet certificates against the cluster CA and selects
@@ -69,7 +70,7 @@ of an existing Deployment, TLS Secret or APIService.
 | `metrics_server_replicas` | 1, deliberate lab profile |
 | `metrics_server_cpu_request` | 100m |
 | `metrics_server_memory_request` | 200Mi |
-| `metrics_server_certificate_days` | 90 |
+| `metrics_server_certificate_days` | 365 |
 | `metrics_server_renew_before_days` | 30 |
 | `metrics_server_timeout` | 300s |
 
@@ -95,13 +96,45 @@ historical monitoring stack or an HPA policy by themselves.
 
 On the control plane the public overlay is under `/opt/k8s-components/metrics-server`.
 Private state/certificates are under `/var/lib/k8s-components/metrics-server`.
-Rerun the same role before the serving leaf has fewer than 30 days remaining.
-It also processes validated pending kubelet serving renewal requests. Kubelet
-serving CSRs are not auto-approved by kube-controller-manager, so renewal needs
-an explicit role run; no scheduler is installed. The leaf fingerprint triggers
-rollout when renewed. Disabling the flag does not uninstall the add-on or undo
+The role installs `metrics-server-renew.timer` on the control plane. It checks at
+03:00 Asia/Bangkok daily, with up to 15 minutes of randomized delay. `Persistent=true`
+catches a missed calendar run after the VM starts again. The control-plane VM and
+Kubernetes API must be running; the administrator's computer need not be connected.
+
+The root-only service keeps the cluster CA key on the control plane, issues a
+365-day leaf when fewer than 30 days remain, reconciles only the owned TLS Secret,
+and changes the Deployment's certificate fingerprint to roll out the new leaf.
+It verifies rollout and API availability. Healthy checks perform no Secret or
+Deployment writes. A shared file lock serializes timer and Ansible certificate
+operations. Failed checks are visible in systemd/journal and retry after 15 minutes;
+there is no external alert delivery. Secret data is passed through stdin and never
+written to the journal. The service has a read-only system filesystem except for
+its private state directory. It uses the existing local administrator kubeconfig;
+this lab mechanism is not a least-privilege external certificate platform.
+
+Changing the lifetime from 90 to 365 days reissues the existing leaf on the next
+apply. The signer must remain valid longer than the requested leaf lifetime.
+The service also repairs interrupted publication or a mismatched Secret on retry.
+
+Inspect or run the automation on the control plane:
+
+```sh
+sudo systemctl list-timers metrics-server-renew.timer
+sudo systemctl start metrics-server-renew.service
+sudo journalctl -u metrics-server-renew.service -n 20 --no-pager
+sudo openssl x509 -in /var/lib/k8s-components/metrics-server/tls/tls.crt -noout -dates
+```
+
+The automatic service renews only the Metrics Server serving leaf. It does not
+rotate the cluster CA, administrator kubeconfig, API server certificates or approve
+kubelet CSRs. Rerunning the role still processes validated pending kubelet serving
+renewal requests. Kubelet serving CSRs are not auto-approved by kube-controller-manager.
+The timer remains installed until explicitly disabled; changing the component flag
+alone does not stop existing automation. Disabling the flag does not uninstall the add-on or undo
 serving TLS; removal and trust migration need an explicit reviewed workflow.
 
 Sources: [Metrics Server requirements](https://github.com/kubernetes-sigs/metrics-server#requirements),
 [kubeadm certificate management](https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/),
 [CSR API](https://kubernetes.io/docs/reference/access-authn-authz/certificate-signing-requests/).
+
+Timer reference: [systemd.timer](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html).

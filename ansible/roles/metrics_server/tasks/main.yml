@@ -66,92 +66,43 @@
       changed_when: true
       when: not (((metrics_server_kubelet_cm.stdout | from_json).data.kubelet | from_yaml).serverTLSBootstrap | default(false))
 
-    - name: Install the local serving-certificate renewal helper
+    - name: Install local certificate reconciliation helpers
       ansible.builtin.copy:
-        src: serving_certificate.py
-        dest: '{{ metrics_server_state_dir }}/serving_certificate.py'
+        src: '{{ item }}'
+        dest: '{{ metrics_server_state_dir }}/{{ item }}'
         owner: root
         group: root
         mode: '0700'
+      loop: [serving_certificate.py, renew_metrics_server.py]
 
-    - name: Issue or renew the local Metrics Server serving certificate
+    - name: Configure the private local renewal policy
+      ansible.builtin.copy:
+        dest: '{{ metrics_server_state_dir }}/renewal.json'
+        content: >-
+          {{ {'state_dir': metrics_server_state_dir, 'kubeconfig': metrics_server_kubeconfig,
+              'ca_cert': metrics_server_ca_cert, 'ca_key': metrics_server_ca_key,
+              'dns_names': ['metrics-server.kube-system.svc',
+                            'metrics-server.kube-system.svc.' ~ metrics_server_cluster_domain],
+              'days': metrics_server_certificate_days | int,
+              'renew_days': metrics_server_renew_before_days | int} | to_nice_json }}
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Reconcile the certificate and Secret under the shared renewal lock
       ansible.builtin.command:
         argv:
           - /usr/bin/python3
-          - '{{ metrics_server_state_dir }}/serving_certificate.py'
-          - --directory
-          - '{{ metrics_server_state_dir }}/tls'
-          - --ca-cert
-          - '{{ metrics_server_ca_cert }}'
-          - --ca-key
-          - '{{ metrics_server_ca_key }}'
-          - --dns-name
-          - metrics-server.kube-system.svc
-          - --dns-name
-          - metrics-server.kube-system.svc.{{ metrics_server_cluster_domain }}
-          - --days
-          - '{{ metrics_server_certificate_days | string }}'
-          - --renew-days
-          - '{{ metrics_server_renew_before_days | string }}'
+          - '{{ metrics_server_state_dir }}/renew_metrics_server.py'
+          - --config
+          - '{{ metrics_server_state_dir }}/renewal.json'
+          - --prepare-only
       register: metrics_server_certificate
       changed_when: (metrics_server_certificate.stdout | from_json).changed
 
     - name: Record the public certificate fingerprint for rollout tracking
       ansible.builtin.set_fact:
         metrics_server_certificate_sha256: '{{ (metrics_server_certificate.stdout | from_json).certificate_sha256 }}'
-
-    - name: Read the current managed serving secret without exposing its contents
-      ansible.builtin.command:
-        argv:
-          - /usr/local/bin/kubectl
-          - --kubeconfig={{ metrics_server_kubeconfig }}
-          - -n
-          - kube-system
-          - get
-          - secret
-          - metrics-server-serving
-          - --ignore-not-found
-          - -o
-          - name
-      register: metrics_server_secret_exists
-      changed_when: false
-
-    - name: Publish only a newly issued or missing serving certificate secret
-      when: (metrics_server_certificate.stdout | from_json).changed or metrics_server_secret_exists.stdout | trim | length == 0
-      block:
-        - name: Build the local TLS secret without logging private key data
-          ansible.builtin.command:
-            argv:
-              - /usr/local/bin/kubectl
-              - --kubeconfig={{ metrics_server_kubeconfig }}
-              - -n
-              - kube-system
-              - create
-              - secret
-              - tls
-              - metrics-server-serving
-              - --cert={{ metrics_server_state_dir }}/tls/tls.crt
-              - --key={{ metrics_server_state_dir }}/tls/tls.key
-              - --dry-run=client
-              - -o
-              - json
-          register: metrics_server_secret
-          changed_when: false
-          no_log: true
-
-        - name: Apply the managed TLS secret through stdin without last-applied annotations
-          ansible.builtin.command:
-            argv:
-              - /usr/local/bin/kubectl
-              - --kubeconfig={{ metrics_server_kubeconfig }}
-              - apply
-              - --server-side
-              - --field-manager=k8s-components
-              - -f
-              - '-'
-            stdin: '{{ metrics_server_secret.stdout }}'
-          changed_when: true
-          no_log: true
 
     - name: Vendor the release manifest using its SHA256 lock
       ansible.builtin.get_url:
@@ -253,3 +204,20 @@
       ansible.builtin.command:
         argv: [/usr/local/bin/kubectl, '--kubeconfig={{ metrics_server_kubeconfig }}', top, pods, -A]
       changed_when: false
+
+    - name: Install the control-plane renewal service and timer
+      ansible.builtin.template:
+        src: '{{ item }}.j2'
+        dest: '/etc/systemd/system/{{ item }}'
+        owner: root
+        group: root
+        mode: '0644'
+      loop: [metrics-server-renew.service, metrics-server-renew.timer]
+      register: metrics_server_renewal_units
+
+    - name: Enable the persistent daily certificate renewal timer
+      ansible.builtin.systemd_service:
+        name: metrics-server-renew.timer
+        enabled: true
+        state: started
+        daemon_reload: '{{ metrics_server_renewal_units.changed }}'

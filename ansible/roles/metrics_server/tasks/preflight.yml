@@ -18,7 +18,7 @@
       - metrics_server_cpu_request is match('^[1-9][0-9]*m$')
       - metrics_server_memory_request is match('^[1-9][0-9]*Mi$')
       - metrics_server_timeout is match('^[1-9][0-9]*s$')
-      - metrics_server_certificate_days | int == 90
+      - metrics_server_certificate_days | int == 365
       - metrics_server_renew_before_days | int == 30
       - baseline_metrics_to_kubelet | bool
     fail_msg: Use the complete lab inventory with verified access and coherent Metrics Server/firewall selection.

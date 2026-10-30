@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the Metrics Server serving certificate daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Bangkok
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
