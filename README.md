@@ -104,6 +104,7 @@ the release bundle intentionally remain `candidate`; deployment validation fails
 | `specs/` | Versioned schema and generic cluster examples |
 | `terraform/modules/cluster_contract/` | Shared typed VM intent and resource budget |
 | `terraform/adapters/proxmox/` | Native VM resources, provider lock and backend example |
+| `terraform/environments/gcp-lab/` | Separate Google Cloud learning lab: GCS state bootstrap and 3 Compute Engine VMs for kubeadm |
 | `ansible/roles/os_baseline/` | Guarded SSH, time sync, auditing, journal limits and selected kernel protections |
 | `ansible/preflight.yml` | Read-only checks against the declared guest contract |
 | `scripts/specctl.py` | Validation and private input generation |

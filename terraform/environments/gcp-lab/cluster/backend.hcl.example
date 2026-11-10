@@ -1,0 +1,3 @@
+# Copy to lab.backend.hcl (gitignored) and use the bucket from the bootstrap output.
+bucket = "example-lab-project-tfstate"
+prefix = "gcp-lab/cluster"

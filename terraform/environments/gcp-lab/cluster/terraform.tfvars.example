@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars (gitignored) and replace the placeholder.
+project_id = "example-lab-project"
+region     = "asia-east2"
+zone       = "asia-east2-a"
+
+# Practice toggles (see README lessons 7-8):
+# use_spot         = true
+# enable_cloud_nat = true
+
+# SSH with an existing key as `ubuntu` (turns OS Login off). Public key path only.
+# ssh_public_key_path = "~/.ssh/example-lab.pub"
+# ssh_user            = "ubuntu"
