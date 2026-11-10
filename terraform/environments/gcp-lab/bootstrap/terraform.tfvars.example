@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (gitignored) and replace the placeholder.
+project_id = "example-lab-project"
+region     = "asia-east2"
+# state_bucket_name = "example-lab-project-tfstate"

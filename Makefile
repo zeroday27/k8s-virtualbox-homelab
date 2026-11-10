@@ -10,6 +10,8 @@ OUT ?= .generated/review
 init:
 	$(TERRAFORM) -chdir=terraform init -backend=false
 	$(TERRAFORM) -chdir=terraform/adapters/proxmox init -backend=false -lockfile=readonly
+	$(TERRAFORM) -chdir=terraform/environments/gcp-lab/bootstrap init -backend=false -lockfile=readonly
+	$(TERRAFORM) -chdir=terraform/environments/gcp-lab/cluster init -backend=false -lockfile=readonly
 
 check: check-python check-terraform check-ansible
 
@@ -27,6 +29,9 @@ check-terraform:
 	$(TERRAFORM) -chdir=terraform validate
 	$(TERRAFORM) -chdir=terraform test -no-color
 	$(TERRAFORM) -chdir=terraform/adapters/proxmox validate
+	$(TERRAFORM) -chdir=terraform/environments/gcp-lab/bootstrap validate
+	$(TERRAFORM) -chdir=terraform/environments/gcp-lab/cluster validate
+	$(TERRAFORM) -chdir=terraform/environments/gcp-lab/cluster test -no-color
 
 check-ansible:
 	ANSIBLE_CONFIG="$(CURDIR)/ansible/ansible.cfg" ANSIBLE_LOCAL_TEMP="$(CURDIR)/.generated/ansible-tmp" $(ANSIBLE_PLAYBOOK) -i 'localhost,' --syntax-check ansible/preflight.yml

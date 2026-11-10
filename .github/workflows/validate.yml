@@ -32,6 +32,11 @@ jobs:
       - run: terraform -chdir=terraform test -no-color
       - run: terraform -chdir=terraform/adapters/proxmox init -backend=false -lockfile=readonly
       - run: terraform -chdir=terraform/adapters/proxmox validate
+      - run: terraform -chdir=terraform/environments/gcp-lab/bootstrap init -backend=false -lockfile=readonly
+      - run: terraform -chdir=terraform/environments/gcp-lab/bootstrap validate
+      - run: terraform -chdir=terraform/environments/gcp-lab/cluster init -backend=false -lockfile=readonly
+      - run: terraform -chdir=terraform/environments/gcp-lab/cluster validate
+      - run: terraform -chdir=terraform/environments/gcp-lab/cluster test -no-color
       - run: ansible-playbook -i 'localhost,' --syntax-check preflight.yml
         working-directory: ansible
       - run: ansible-playbook -i 'localhost,' --syntax-check playbooks/00-os-base.yml

@@ -1,0 +1,4 @@
+# Only for Lesson 3 (migrating bootstrap state into the bucket).
+# Copy to bootstrap.backend.hcl (gitignored) and set the real bucket name.
+bucket = "example-lab-project-tfstate"
+prefix = "gcp-lab/bootstrap"
